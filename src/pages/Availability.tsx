@@ -67,6 +67,16 @@ const Availability = () => {
 
   const getSlotStatus = (day: number, time: string) => {
     const random = Math.random();
+    
+    // When viewing all courts, show partly/fully booked states
+    if (selectedCourt === "all" || selectedCourt === "all-courts") {
+      if (random > 0.7) return "available";
+      if (random > 0.5) return "partly-booked";
+      if (random > 0.3) return "fully-booked";
+      return "blocked";
+    }
+    
+    // For individual courts, show simple available/booked/blocked
     if (random > 0.7) return "available";
     if (random > 0.5) return "booked";
     return "blocked";
@@ -76,6 +86,10 @@ const Availability = () => {
     switch (status) {
       case "available":
         return "bg-green-100 hover:bg-green-200 border-green-300";
+      case "partly-booked":
+        return "bg-orange-100 hover:bg-orange-200 border-orange-300";
+      case "fully-booked":
+        return "bg-red-100 border-red-300";
       case "booked":
         return "bg-blue-100 border-blue-300";
       case "blocked":
@@ -210,10 +224,23 @@ const Availability = () => {
                     <div className="w-4 h-4 rounded bg-green-100 border-2 border-green-300" />
                     <span className="text-xs">Available</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded bg-blue-100 border-2 border-blue-300" />
-                    <span className="text-xs">Booked</span>
-                  </div>
+                  {(selectedCourt === "all" || selectedCourt === "all-courts") ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded bg-orange-100 border-2 border-orange-300" />
+                        <span className="text-xs">Partly Booked</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded bg-red-100 border-2 border-red-300" />
+                        <span className="text-xs">Fully Booked</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 rounded bg-blue-100 border-2 border-blue-300" />
+                      <span className="text-xs">Booked</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <div className="w-4 h-4 rounded bg-gray-100 border-2 border-gray-300" />
                     <span className="text-xs">Blocked</span>
