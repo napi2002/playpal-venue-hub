@@ -36,97 +36,14 @@ import {
   RefreshCw,
   Eye,
 } from "lucide-react";
+import { AddBookingDialog } from "@/components/AddBookingDialog";
+import { useBookings } from "@/contexts/BookingsContext";
 
 const Bookings = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-
-  const bookings = [
-    {
-      id: "BK-001",
-      dateTime: "2025-01-15 09:00",
-      court: "Court 1",
-      sport: "Tennis",
-      player: "John Doe",
-      email: "john@example.com",
-      status: "paid",
-      payment: "PromptPay",
-      source: "PlayPal App",
-      amount: 300,
-    },
-    {
-      id: "BK-002",
-      dateTime: "2025-01-15 10:00",
-      court: "Court 2",
-      sport: "Badminton",
-      player: "Sarah Miller",
-      email: "sarah@example.com",
-      status: "pending",
-      payment: "-",
-      source: "Manual",
-      amount: 250,
-    },
-    {
-      id: "BK-003",
-      dateTime: "2025-01-15 11:00",
-      court: "Court 1",
-      sport: "Tennis",
-      player: "Mike Rodriguez",
-      email: "mike@example.com",
-      status: "confirmed",
-      payment: "Card",
-      source: "PlayPal App",
-      amount: 300,
-    },
-    {
-      id: "BK-004",
-      dateTime: "2025-01-15 14:00",
-      court: "Court 3",
-      sport: "Squash",
-      player: "Emma Lee",
-      email: "emma@example.com",
-      status: "paid",
-      payment: "PromptPay",
-      source: "API",
-      amount: 280,
-    },
-    {
-      id: "BK-005",
-      dateTime: "2025-01-15 15:00",
-      court: "Court 2",
-      sport: "Badminton",
-      player: "Tom Wilson",
-      email: "tom@example.com",
-      status: "cancelled",
-      payment: "Refunded",
-      source: "PlayPal App",
-      amount: 250,
-    },
-    {
-      id: "BK-006",
-      dateTime: "2025-01-16 09:00",
-      court: "Court 1",
-      sport: "Tennis",
-      player: "Lisa Chen",
-      email: "lisa@example.com",
-      status: "held",
-      payment: "-",
-      source: "Manual",
-      amount: 300,
-    },
-    {
-      id: "BK-007",
-      dateTime: "2025-01-16 10:00",
-      court: "Court 4",
-      sport: "Tennis",
-      player: "David Park",
-      email: "david@example.com",
-      status: "paid",
-      payment: "Card",
-      source: "PlayPal App",
-      amount: 300,
-    },
-  ];
+  const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
+  const { bookings } = useBookings();
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -166,6 +83,10 @@ const Bookings = () => {
     return matchesStatus && matchesSearch;
   });
 
+  const formatDateTime = (date: string, time: string) => {
+    return `${date} ${time}`;
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -182,7 +103,7 @@ const Bookings = () => {
               <Download className="mr-2 h-4 w-4" />
               Export
             </Button>
-            <Button variant="cta">
+            <Button variant="cta" onClick={() => setBookingDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Manual booking
             </Button>
@@ -246,7 +167,7 @@ const Bookings = () => {
                     <TableRow key={booking.id} className="hover:bg-muted/30">
                       <TableCell className="font-medium">{booking.id}</TableCell>
                       <TableCell className="whitespace-nowrap">
-                        {booking.dateTime}
+                        {formatDateTime(booking.date, booking.time)}
                       </TableCell>
                       <TableCell>{booking.court}</TableCell>
                       <TableCell>
@@ -257,9 +178,11 @@ const Bookings = () => {
                       <TableCell>
                         <div>
                           <div className="font-medium">{booking.player}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {booking.email}
-                          </div>
+                          {booking.email && (
+                            <div className="text-xs text-muted-foreground">
+                              {booking.email}
+                            </div>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -280,7 +203,7 @@ const Bookings = () => {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        ฿{booking.amount}
+                        {booking.amount}
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>
@@ -329,6 +252,8 @@ const Bookings = () => {
           </CardContent>
         </Card>
       </div>
+      
+      <AddBookingDialog open={bookingDialogOpen} onOpenChange={setBookingDialogOpen} />
     </DashboardLayout>
   );
 };

@@ -19,10 +19,12 @@ import {
   Clock,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AddBookingDialog } from "@/components/AddBookingDialog";
 
 const Availability = () => {
   const [selectedCourt, setSelectedCourt] = useState("all");
   const [currentWeek, setCurrentWeek] = useState(0);
+  const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
 
   const courts = ["All Courts", "Court 1", "Court 2", "Court 3", "Court 4"];
   
@@ -116,6 +118,10 @@ const Availability = () => {
             <Button variant="cta">
               <Plus className="mr-2 h-4 w-4" />
               Add availability
+            </Button>
+            <Button variant="outline" onClick={() => setBookingDialogOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add booking
             </Button>
           </div>
         </div>
@@ -326,6 +332,8 @@ const Availability = () => {
           </TabsContent>
         </Tabs>
       </div>
+      
+      <AddBookingDialog open={bookingDialogOpen} onOpenChange={setBookingDialogOpen} />
     </DashboardLayout>
   );
 };

@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BookingsProvider } from "@/contexts/BookingsContext";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Venue from "./pages/Venue";
@@ -20,26 +21,28 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Login />} />
-          <Route path="/dashboard" element={<DashboardLayout><Dashboard /></DashboardLayout>} />
-          <Route path="/venue" element={<Venue />} />
-          <Route path="/availability" element={<Availability />} />
-          <Route path="/bookings" element={<Bookings />} />
-          <Route path="/payments" element={<Payments />} />
-          <Route path="/integrations" element={<Integrations />} />
-          <Route path="/team" element={<Team />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
+    <BookingsProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Login />} />
+            <Route path="/dashboard" element={<DashboardLayout><Dashboard /></DashboardLayout>} />
+            <Route path="/venue" element={<Venue />} />
+            <Route path="/availability" element={<Availability />} />
+            <Route path="/bookings" element={<Bookings />} />
+            <Route path="/payments" element={<Payments />} />
+            <Route path="/integrations" element={<Integrations />} />
+            <Route path="/team" element={<Team />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </BookingsProvider>
   </QueryClientProvider>
 );
 

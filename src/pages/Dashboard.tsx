@@ -1,3 +1,5 @@
+import { useState } from "react";
+import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,8 +12,10 @@ import {
   Download,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { AddBookingDialog } from "@/components/AddBookingDialog";
 
 const Dashboard = () => {
+  const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
   const kpis = [
     {
       title: "Bookings Today",
@@ -76,7 +80,8 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <DashboardLayout>
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -88,7 +93,7 @@ const Dashboard = () => {
             <Download className="mr-2 h-4 w-4" />
             Export CSV
           </Button>
-          <Button variant="cta" size="sm">
+          <Button variant="cta" size="sm" onClick={() => setBookingDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Add booking
           </Button>
@@ -178,7 +183,10 @@ const Dashboard = () => {
           </div>
         </CardContent>
       </Card>
-    </div>
+      </div>
+      
+      <AddBookingDialog open={bookingDialogOpen} onOpenChange={setBookingDialogOpen} />
+    </DashboardLayout>
   );
 };
 
