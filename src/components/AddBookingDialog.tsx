@@ -80,10 +80,11 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px]">
+      <DialogContent className="sm:max-w-[600px]" aria-describedby="add-booking-description">
         <DialogHeader>
           <DialogTitle>Add Manual Booking</DialogTitle>
         </DialogHeader>
+        <p id="add-booking-description" className="sr-only">Fill out the form to create a new booking manually</p>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-2 gap-4">
