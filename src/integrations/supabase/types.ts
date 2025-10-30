@@ -14,16 +14,113 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      bookings: {
+        Row: {
+          amount: string
+          booking_number: string
+          court_id: string
+          created_at: string
+          date: string
+          duration: number
+          id: string
+          notes: string | null
+          payment_status: string
+          player_email: string
+          player_name: string
+          source: string
+          sport: string
+          status: Database["public"]["Enums"]["booking_status"]
+          time: string
+          updated_at: string
+        }
+        Insert: {
+          amount: string
+          booking_number: string
+          court_id: string
+          created_at?: string
+          date: string
+          duration?: number
+          id?: string
+          notes?: string | null
+          payment_status?: string
+          player_email: string
+          player_name: string
+          source: string
+          sport: string
+          status?: Database["public"]["Enums"]["booking_status"]
+          time: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: string
+          booking_number?: string
+          court_id?: string
+          created_at?: string
+          date?: string
+          duration?: number
+          id?: string
+          notes?: string | null
+          payment_status?: string
+          player_email?: string
+          player_name?: string
+          source?: string
+          sport?: string
+          status?: Database["public"]["Enums"]["booking_status"]
+          time?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bookings_court_id_fkey"
+            columns: ["court_id"]
+            isOneToOne: false
+            referencedRelation: "courts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      courts: {
+        Row: {
+          buffer_minutes: number
+          created_at: string
+          id: string
+          name: string
+          off_peak_price: number
+          peak_price: number
+          sport: string
+          status: string
+        }
+        Insert: {
+          buffer_minutes?: number
+          created_at?: string
+          id?: string
+          name: string
+          off_peak_price: number
+          peak_price: number
+          sport: string
+          status?: string
+        }
+        Update: {
+          buffer_minutes?: number
+          created_at?: string
+          id?: string
+          name?: string
+          off_peak_price?: number
+          peak_price?: number
+          sport?: string
+          status?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      generate_booking_number: { Args: never; Returns: string }
     }
     Enums: {
-      [_ in never]: never
+      booking_status: "pending" | "confirmed" | "paid" | "cancelled" | "held"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +247,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      booking_status: ["pending", "confirmed", "paid", "cancelled", "held"],
+    },
   },
 } as const
