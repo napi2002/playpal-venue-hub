@@ -35,15 +35,17 @@ import {
   X,
   RefreshCw,
   Eye,
+  Trash2,
 } from "lucide-react";
 import { AddBookingDialog } from "@/components/AddBookingDialog";
-import { useBookings } from "@/contexts/BookingsContext";
+import { useBookings } from "@/hooks/useBookings";
+import { format } from "date-fns";
 
 const Bookings = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
-  const { bookings } = useBookings();
+  const { bookings, isLoading, updateBooking, deleteBooking } = useBookings();
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -77,14 +79,32 @@ const Bookings = () => {
     const matchesStatus = statusFilter === "all" || booking.status === statusFilter;
     const matchesSearch =
       searchQuery === "" ||
-      booking.player.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      booking.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      booking.court.toLowerCase().includes(searchQuery.toLowerCase());
+      booking.player_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      booking.booking_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (booking.courts?.name && booking.courts.name.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesStatus && matchesSearch;
   });
 
   const formatDateTime = (date: string, time: string) => {
-    return `${date} ${time}`;
+    try {
+      const dateTime = new Date(`${date}T${time}`);
+      return format(dateTime, "MMM dd, yyyy HH:mm");
+    } catch {
+      return `${date} ${time}`;
+    }
+  };
+
+  const handleStatusChange = (bookingId: string, status: string) => {
+    updateBooking({ 
+      id: bookingId, 
+      updates: { status: status as any } 
+    });
+  };
+
+  const handleDelete = (bookingId: string) => {
+    if (confirm("Are you sure you want to delete this booking?")) {
+      deleteBooking(bookingId);
+    }
   };
 
   return (
@@ -163,89 +183,105 @@ const Bookings = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredBookings.map((booking) => (
-                    <TableRow key={booking.id} className="hover:bg-muted/30">
-                      <TableCell className="font-medium">{booking.id}</TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {formatDateTime(booking.date, booking.time)}
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-center py-8">
+                        Loading bookings...
                       </TableCell>
-                      <TableCell>{booking.court}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">
-                          {booking.sport}
-                        </Badge>
+                    </TableRow>
+                  ) : filteredBookings.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                        No bookings found
                       </TableCell>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{booking.player}</div>
-                          {booking.email && (
+                    </TableRow>
+                  ) : (
+                    filteredBookings.map((booking) => (
+                      <TableRow key={booking.id} className="hover:bg-muted/30">
+                        <TableCell className="font-medium">{booking.booking_number}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {formatDateTime(booking.date, booking.time)}
+                        </TableCell>
+                        <TableCell>{booking.courts?.name || booking.court_id}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs">
+                            {booking.sport}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">{booking.player_name}</div>
                             <div className="text-xs text-muted-foreground">
-                              {booking.email}
+                              {booking.player_email}
                             </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={getStatusColor(booking.status)}
-                        >
-                          {booking.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">{booking.payment}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={getSourceColor(booking.source)}
-                        >
-                          {booking.source}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {booking.amount}
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
-                              <Eye className="mr-2 h-4 w-4" />
-                              View details
-                            </DropdownMenuItem>
-                            {booking.status === "pending" && (
-                              <>
-                                <DropdownMenuItem>
-                                  <Check className="mr-2 h-4 w-4" />
-                                  Approve
-                                </DropdownMenuItem>
-                                <DropdownMenuItem className="text-destructive">
-                                  <X className="mr-2 h-4 w-4" />
-                                  Decline
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                            {(booking.status === "paid" || booking.status === "confirmed") && (
-                              <>
-                                <DropdownMenuItem>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={getStatusColor(booking.status)}
+                          >
+                            {booking.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm">{booking.payment_status}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={getSourceColor(booking.source)}
+                          >
+                            {booking.source}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          ${booking.amount}
+                        </TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem>
+                                <Eye className="mr-2 h-4 w-4" />
+                                View details
+                              </DropdownMenuItem>
+                              {booking.status === "pending" && (
+                                <>
+                                  <DropdownMenuItem onClick={() => handleStatusChange(booking.id, "confirmed")}>
+                                    <Check className="mr-2 h-4 w-4" />
+                                    Approve
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    className="text-destructive"
+                                    onClick={() => handleStatusChange(booking.id, "cancelled")}
+                                  >
+                                    <X className="mr-2 h-4 w-4" />
+                                    Decline
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                              {(booking.status === "paid" || booking.status === "confirmed") && (
+                                <DropdownMenuItem onClick={() => handleStatusChange(booking.id, "cancelled")}>
                                   <X className="mr-2 h-4 w-4" />
                                   Cancel
                                 </DropdownMenuItem>
-                                <DropdownMenuItem>
-                                  <RefreshCw className="mr-2 h-4 w-4" />
-                                  Refund
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                              )}
+                              <DropdownMenuItem 
+                                className="text-destructive"
+                                onClick={() => handleDelete(booking.id)}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </div>
