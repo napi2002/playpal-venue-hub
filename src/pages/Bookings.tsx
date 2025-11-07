@@ -36,8 +36,10 @@ import {
   RefreshCw,
   Eye,
   Trash2,
+  Repeat,
 } from "lucide-react";
 import { AddBookingDialog } from "@/components/AddBookingDialog";
+import { AddRecurringBookingDialog } from "@/components/AddRecurringBookingDialog";
 import { useBookings } from "@/hooks/useBookings";
 import { format } from "date-fns";
 
@@ -45,6 +47,7 @@ const Bookings = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
+  const [recurringDialogOpen, setRecurringDialogOpen] = useState(false);
   const { bookings, isLoading, updateBooking, deleteBooking } = useBookings();
 
   const getStatusColor = (status: string) => {
@@ -122,6 +125,10 @@ const Bookings = () => {
             <Button variant="outline">
               <Download className="mr-2 h-4 w-4" />
               Export
+            </Button>
+            <Button variant="outline" onClick={() => setRecurringDialogOpen(true)}>
+              <Repeat className="mr-2 h-4 w-4" />
+              Recurring
             </Button>
             <Button variant="cta" onClick={() => setBookingDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
@@ -290,6 +297,7 @@ const Bookings = () => {
       </div>
       
       <AddBookingDialog open={bookingDialogOpen} onOpenChange={setBookingDialogOpen} />
+      <AddRecurringBookingDialog open={recurringDialogOpen} onOpenChange={setRecurringDialogOpen} />
     </DashboardLayout>
   );
 };

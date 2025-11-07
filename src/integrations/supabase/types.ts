@@ -303,6 +303,60 @@ export type Database = {
           },
         ]
       }
+      recurring_bookings: {
+        Row: {
+          amount: string
+          court_id: string
+          created_at: string
+          day_of_week: number
+          duration: number
+          end_date: string | null
+          id: string
+          player_email: string
+          player_name: string
+          sport: string
+          start_date: string
+          status: Database["public"]["Enums"]["booking_status"]
+          time: string
+          updated_at: string
+          venue_id: string
+        }
+        Insert: {
+          amount: string
+          court_id: string
+          created_at?: string
+          day_of_week: number
+          duration?: number
+          end_date?: string | null
+          id?: string
+          player_email: string
+          player_name: string
+          sport: string
+          start_date: string
+          status?: Database["public"]["Enums"]["booking_status"]
+          time: string
+          updated_at?: string
+          venue_id: string
+        }
+        Update: {
+          amount?: string
+          court_id?: string
+          created_at?: string
+          day_of_week?: number
+          duration?: number
+          end_date?: string | null
+          id?: string
+          player_email?: string
+          player_name?: string
+          sport?: string
+          start_date?: string
+          status?: Database["public"]["Enums"]["booking_status"]
+          time?: string
+          updated_at?: string
+          venue_id?: string
+        }
+        Relationships: []
+      }
       user_profiles: {
         Row: {
           avatar_url: string | null
@@ -539,6 +593,10 @@ export type Database = {
     }
     Functions: {
       generate_booking_number: { Args: never; Returns: string }
+      generate_bookings_from_recurring: {
+        Args: { _recurring_booking_id: string; _weeks_ahead?: number }
+        Returns: number
+      }
       get_user_venue_id: { Args: { _user_id: string }; Returns: string }
       has_role: {
         Args: {

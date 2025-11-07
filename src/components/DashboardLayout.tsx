@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -36,6 +37,7 @@ const navigation = [
 const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const { signOut } = useAuth();
 
   return (
     <div className="min-h-screen flex w-full bg-background">
@@ -98,6 +100,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
           <div className="border-t border-sidebar-border p-3">
             <Button
               variant="ghost"
+              onClick={signOut}
               className={cn(
                 "w-full justify-start gap-3",
                 collapsed && "justify-center"
