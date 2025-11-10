@@ -18,16 +18,8 @@ const Login = () => {
   useEffect(() => {
     if (user) {
       navigate("/dashboard");
-    } else {
-      // Auto-login with default credentials
-      const autoLogin = async () => {
-        setLoading(true);
-        await signIn("admin@playpal.com", "Admin");
-        setLoading(false);
-      };
-      autoLogin();
     }
-  }, [user, navigate, signIn]);
+  }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
