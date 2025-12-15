@@ -4,14 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { LogIn } from "lucide-react";
+import { LogIn, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 
 const Login = () => {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("admin@playpal.com");
+  const [password, setPassword] = useState("Admin");
   const [loading, setLoading] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
   const navigate = useNavigate();
   const { signIn, user } = useAuth();
 
@@ -29,7 +31,26 @@ const Login = () => {
     }
 
     setLoading(true);
-    await signIn(email, password);
+    
+    if (isSignUp) {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/dashboard`
+        }
+      });
+      
+      if (error) {
+        toast.error(error.message);
+      } else {
+        toast.success("Account created! You can now sign in.");
+        setIsSignUp(false);
+      }
+    } else {
+      await signIn(email, password);
+    }
+    
     setLoading(false);
   };
 
@@ -42,7 +63,7 @@ const Login = () => {
           </div>
           <CardTitle className="text-2xl font-semibold">Welcome to PlayPal</CardTitle>
           <CardDescription className="text-base">
-            Sign in to manage your venue
+            {isSignUp ? "Create your account" : "Sign in to manage your venue"}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -77,13 +98,33 @@ const Login = () => {
               className="w-full h-11 text-base"
               disabled={loading}
             >
-              <LogIn className="mr-2 h-5 w-5" />
-              {loading ? "Signing in..." : "Sign in"}
+              {isSignUp ? (
+                <>
+                  <UserPlus className="mr-2 h-5 w-5" />
+                  {loading ? "Creating account..." : "Create Account"}
+                </>
+              ) : (
+                <>
+                  <LogIn className="mr-2 h-5 w-5" />
+                  {loading ? "Signing in..." : "Sign in"}
+                </>
+              )}
             </Button>
           </form>
 
-          <p className="text-center text-sm text-muted-foreground mt-4">
-            Default credentials: admin@playpal.com / Admin
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="text-sm text-primary hover:underline"
+              disabled={loading}
+            >
+              {isSignUp ? "Already have an account? Sign in" : "Don't have an account? Sign up"}
+            </button>
+          </div>
+
+          <p className="text-center text-sm text-muted-foreground mt-2">
+            {isSignUp ? "Use admin@playpal.com / Admin to create the admin account" : "Default credentials: admin@playpal.com / Admin"}
           </p>
         </CardContent>
       </Card>
