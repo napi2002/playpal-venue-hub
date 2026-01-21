@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, type FormEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { useBookings } from "@/hooks/useBookings";
 import { useCourts } from "@/hooks/useCourts";
-import { supabase } from "@/integrations/supabase/client";
 
 interface AddBookingDialogProps {
   open: boolean;
@@ -31,7 +30,21 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
     notes: "",
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const generateBookingNumber = () => {
+    const timestamp = Date.now().toString().slice(-6);
+    const random = Math.floor(Math.random() * 90) + 10;
+    return `BK${timestamp}${random}`;
+  };
+
+  const toBangkokUtcIso = (date: string, time: string) => {
+    const [year, month, day] = date.split("-").map(Number);
+    const [hour, minute] = time.split(":").map(Number);
+    // Bangkok is UTC+7; store UTC in the DB.
+    const utcDate = new Date(Date.UTC(year, month - 1, day, hour - 7, minute, 0));
+    return utcDate.toISOString();
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     
     if (!formData.courtId || !formData.sport || !formData.player || !formData.email) {
@@ -46,27 +59,30 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
       if (!selectedCourt) {
         throw new Error("Selected court not found");
       }
+      if (!selectedCourt.venue_id) {
+        throw new Error("Selected court is missing venue access");
+      }
 
       // Calculate amount based on sport and duration
       const pricePerHour = formData.sport === "Tennis" ? 45 : formData.sport === "Padel" ? 40 : 35;
       const amount = ((pricePerHour * formData.duration) / 60).toFixed(2);
 
-      // Generate booking number
-      const { data: bookingNumber, error: numberError } = await supabase
-        .rpc('generate_booking_number');
+      const bookingNumber = generateBookingNumber();
+      const startAt = toBangkokUtcIso(formData.date, formData.time);
+      const endAt = new Date(new Date(startAt).getTime() + formData.duration * 60000).toISOString();
 
-      if (numberError) throw numberError;
-
-      addBooking({
-        venue_id: selectedCourt.venue_id!,
+      await addBooking({
+        venue_id: selectedCourt.venue_id,
         booking_number: bookingNumber,
         date: formData.date,
         time: formData.time,
+        start_at: startAt,
+        end_at: endAt,
         court_id: formData.courtId,
         sport: formData.sport,
         player_name: formData.player,
         player_email: formData.email,
-        status: "pending",
+        status: formData.paymentStatus === "Paid" ? "paid" : "pending",
         payment_status: formData.paymentStatus,
         source: "Manual",
         amount: amount,
@@ -86,7 +102,7 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
         paymentStatus: "Pending",
         notes: "",
       });
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error creating booking:", error);
     } finally {
       setIsSubmitting(false);

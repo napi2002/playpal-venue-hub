@@ -1,34 +1,14 @@
-import { useEffect, useState } from "react";
-import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useAuthSession } from "@/contexts/AuthContext";
 
 export const useAuth = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, session, loading } = useAuthSession();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    // Set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
-
-    // Check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+  const getErrorMessage = (error: unknown, fallback: string) =>
+    error instanceof Error && error.message ? error.message : fallback;
 
   const signIn = async (email: string, password: string) => {
     try {
@@ -42,8 +22,8 @@ export const useAuth = () => {
       toast.success("Signed in successfully");
       navigate("/dashboard");
       return { data, error: null };
-    } catch (error: any) {
-      toast.error(error.message || "Failed to sign in");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to sign in"));
       return { data: null, error };
     }
   };
@@ -56,8 +36,8 @@ export const useAuth = () => {
       toast.success("Signed out successfully");
       navigate("/");
       return { error: null };
-    } catch (error: any) {
-      toast.error(error.message || "Failed to sign out");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to sign out"));
       return { error };
     }
   };

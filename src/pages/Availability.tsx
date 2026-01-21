@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,85 +20,185 @@ import {
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AddBookingDialog } from "@/components/AddBookingDialog";
+import { useCourts } from "@/hooks/useCourts";
+import { useVenue } from "@/hooks/useVenue";
+import { apiFetch } from "@/lib/apiClient";
+import { addDays, addMinutes, addWeeks, format, startOfDay, startOfWeek } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
+import type { BookingEvent, BookingStatus } from "@/types/availability";
 
 const Availability = () => {
   const [selectedCourt, setSelectedCourt] = useState("all");
-  const [currentWeek, setCurrentWeek] = useState(0);
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [viewMode, setViewMode] = useState<"week" | "day">("week");
   const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
+  const [bookingEvents, setBookingEvents] = useState<BookingEvent[]>([]);
+  const [loadingBookings, setLoadingBookings] = useState(false);
+  const { courts } = useCourts();
+  const { venue } = useVenue();
+  const { toast } = useToast();
 
-  const courts = ["All Courts", "Court 1", "Court 2", "Court 3", "Court 4"];
-  
-  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const timeSlots = [
-    "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", 
-    "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00"
-  ];
+  const availabilityRules: {
+    id: number;
+    name: string;
+    courts: string[];
+    days: string;
+    time: string;
+    minDuration: string;
+    buffer: string;
+    leadTime: string;
+  }[] = [];
 
-  const availabilityRules = [
-    {
-      id: 1,
-      name: "Weekday Morning",
-      courts: ["Court 1", "Court 2"],
-      days: "Mon-Fri",
-      time: "08:00-12:00",
-      minDuration: "60 mins",
-      buffer: "15 mins",
-      leadTime: "2 hours",
-    },
-    {
-      id: 2,
-      name: "Weekend Peak",
-      courts: ["All Courts"],
-      days: "Sat-Sun",
-      time: "09:00-18:00",
-      minDuration: "90 mins",
-      buffer: "15 mins",
-      leadTime: "4 hours",
-    },
-    {
-      id: 3,
-      name: "Evening Slots",
-      courts: ["Court 3", "Court 4"],
-      days: "Mon-Sun",
-      time: "17:00-21:00",
-      minDuration: "60 mins",
-      buffer: "10 mins",
-      leadTime: "2 hours",
-    },
-  ];
+  const slotMinutes = 30;
+  const dayStartHour = 6;
+  const dayEndHour = 22;
+  const slotHeight = 24;
+  const pxPerMinute = slotHeight / slotMinutes;
 
-  const getSlotStatus = (day: number, time: string) => {
-    const random = Math.random();
-    
-    // When viewing all courts, show partly/fully booked states
-    if (selectedCourt === "all" || selectedCourt === "all-courts") {
-      if (random > 0.7) return "available";
-      if (random > 0.5) return "partly-booked";
-      if (random > 0.3) return "fully-booked";
-      return "blocked";
+  const weekStart = useMemo(
+    () => startOfWeek(currentDate, { weekStartsOn: 1 }),
+    [currentDate],
+  );
+
+  const visibleDays = useMemo(() => {
+    if (viewMode === "day") {
+      return [startOfDay(currentDate)];
     }
-    
-    // For individual courts, show simple available/booked/blocked
-    if (random > 0.7) return "available";
-    if (random > 0.5) return "booked";
-    return "blocked";
+    return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+  }, [currentDate, viewMode, weekStart]);
+
+  const rangeStart = useMemo(() => startOfDay(visibleDays[0]), [visibleDays]);
+  const rangeEnd = useMemo(
+    () => addDays(startOfDay(visibleDays[visibleDays.length - 1]), 1),
+    [visibleDays],
+  );
+
+  const timeSlots = useMemo(() => {
+    const slots: number[] = [];
+    for (let hour = dayStartHour; hour < dayEndHour; hour += 1) {
+      for (let minutes = 0; minutes < 60; minutes += slotMinutes) {
+        slots.push(hour * 60 + minutes);
+      }
+    }
+    return slots;
+  }, []);
+
+  const eventsWithDates = useMemo(
+    () =>
+      bookingEvents.map((event) => ({
+        ...event,
+        startDate: new Date(event.start),
+        endDate: new Date(event.end),
+      })),
+    [bookingEvents],
+  );
+
+  const fetchBookings = useCallback(async () => {
+    if (!venue?.id) return;
+    setLoadingBookings(true);
+    try {
+      const params = new URLSearchParams({
+        start: rangeStart.toISOString(),
+        end: rangeEnd.toISOString(),
+      });
+      if (selectedCourt !== "all") {
+        params.set("courtId", selectedCourt);
+      }
+      const data = await apiFetch(`/api/venues/${venue.id}/bookings?${params.toString()}`);
+      setBookingEvents(Array.isArray(data) ? data : []);
+    } catch (error) {
+      toast({
+        title: "Failed to load bookings",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingBookings(false);
+    }
+  }, [rangeEnd, rangeStart, selectedCourt, toast, venue?.id]);
+
+  useEffect(() => {
+    fetchBookings();
+  }, [fetchBookings]);
+
+  useEffect(() => {
+    if (!bookingDialogOpen) {
+      fetchBookings();
+    }
+  }, [bookingDialogOpen, fetchBookings]);
+
+  const formatDayLabel = (date: Date) =>
+    new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      timeZone: "Asia/Bangkok",
+    }).format(date);
+
+  const formatTimeLabel = (date: Date) =>
+    new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: "Asia/Bangkok",
+    }).format(date);
+
+  const buildSlotDate = (day: Date, minutesFromStart: number) => {
+    const base = new Date(day);
+    base.setHours(dayStartHour, 0, 0, 0);
+    return addMinutes(base, minutesFromStart);
   };
 
-  const getSlotColor = (status: string) => {
-    switch (status) {
-      case "available":
-        return "bg-green-100 hover:bg-green-200 border-green-300";
-      case "partly-booked":
-        return "bg-orange-100 hover:bg-orange-200 border-orange-300";
-      case "fully-booked":
-        return "bg-red-100 border-red-300";
-      case "booked":
-        return "bg-blue-100 border-blue-300";
-      case "blocked":
-        return "bg-gray-100 border-gray-300";
-      default:
-        return "bg-muted";
+  const getEventSlices = (day: Date, event: { startDate: Date; endDate: Date }) => {
+    const dayStart = new Date(day);
+    dayStart.setHours(dayStartHour, 0, 0, 0);
+    const dayEnd = new Date(day);
+    dayEnd.setHours(dayEndHour, 0, 0, 0);
+
+    if (event.endDate <= dayStart || event.startDate >= dayEnd) {
+      return null;
     }
+
+    const sliceStart = event.startDate > dayStart ? event.startDate : dayStart;
+    const sliceEnd = event.endDate < dayEnd ? event.endDate : dayEnd;
+    return { sliceStart, sliceEnd, dayStart };
+  };
+
+  const hasOverlap = (start: Date, end: Date) =>
+    eventsWithDates.find(
+      (event) => start < event.endDate && end > event.startDate,
+    );
+
+  const handleSlotSelect = (day: Date, minutesFromStart: number) => {
+    const start = buildSlotDate(day, minutesFromStart);
+    const end = addMinutes(start, 60);
+    const conflict = hasOverlap(start, end);
+    if (conflict) {
+      const statusLabel = conflict.status === "PAID" ? "Paid booking" : "Pending booking";
+      toast({
+        title: "This time is not available",
+        description: `This time is not available (${statusLabel})`,
+        variant: "destructive",
+      });
+      return;
+    }
+    setBookingDialogOpen(true);
+  };
+
+  const bookingLabel = (event: BookingEvent, mode: "week" | "day") => {
+    const statusLabel = event.status === "PAID" ? "Paid" : "Pending";
+    if (selectedCourt === "all" && mode === "week") {
+      return `${event.courtName} • ${statusLabel}`;
+    }
+    if (selectedCourt === "all") {
+      return `${event.courtName} • ${statusLabel}`;
+    }
+    return statusLabel;
+  };
+
+  const formatWeekTitle = () => {
+    const end = addDays(weekStart, 6);
+    return `${format(weekStart, "MMM dd")} - ${format(end, "MMM dd")}`;
   };
 
   return (
@@ -144,11 +244,18 @@ const Availability = () => {
                         <SelectValue placeholder="Select court" />
                       </SelectTrigger>
                       <SelectContent>
-                        {courts.map((court) => (
-                          <SelectItem key={court} value={court.toLowerCase().replace(" ", "-")}>
-                            {court}
+                        <SelectItem value="all">All courts</SelectItem>
+                        {courts.length === 0 ? (
+                          <SelectItem value="none" disabled>
+                            No courts available
                           </SelectItem>
-                        ))}
+                        ) : (
+                          courts.map((court) => (
+                            <SelectItem key={court.id} value={court.id}>
+                              {court.name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -156,20 +263,50 @@ const Availability = () => {
                     <Button
                       variant="outline"
                       size="icon"
-                      onClick={() => setCurrentWeek(currentWeek - 1)}
+                      onClick={() =>
+                        setCurrentDate(
+                          viewMode === "week"
+                            ? addWeeks(currentDate, -1)
+                            : addDays(currentDate, -1),
+                        )
+                      }
                     >
                       <ChevronLeft className="h-4 w-4" />
                     </Button>
                     <div className="flex items-center gap-2 px-4">
                       <CalendarIcon className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">Week {currentWeek + 1}</span>
+                      <span className="text-sm font-medium">
+                        {viewMode === "week" ? formatWeekTitle() : format(currentDate, "MMM dd, yyyy")}
+                      </span>
                     </div>
                     <Button
                       variant="outline"
                       size="icon"
-                      onClick={() => setCurrentWeek(currentWeek + 1)}
+                      onClick={() =>
+                        setCurrentDate(
+                          viewMode === "week"
+                            ? addWeeks(currentDate, 1)
+                            : addDays(currentDate, 1),
+                        )
+                      }
                     >
                       <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={viewMode === "day" ? "cta" : "outline"}
+                      size="sm"
+                      onClick={() => setViewMode("day")}
+                    >
+                      Day
+                    </Button>
+                    <Button
+                      variant={viewMode === "week" ? "cta" : "outline"}
+                      size="sm"
+                      onClick={() => setViewMode("week")}
+                    >
+                      Week
                     </Button>
                   </div>
                 </div>
@@ -179,77 +316,76 @@ const Availability = () => {
             {/* Calendar Grid */}
             <Card className="shadow-sm overflow-hidden">
               <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <div className="inline-block min-w-full align-middle">
-                    <table className="min-w-full divide-y divide-border">
-                      <thead className="bg-muted/50 sticky top-0">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground w-20">
-                            Time
-                          </th>
-                          {weekDays.map((day) => (
-                            <th
-                              key={day}
-                              className="px-4 py-3 text-center text-xs font-medium text-muted-foreground"
-                            >
-                              {day}
-                            </th>
+                <div className="grid grid-cols-[80px_1fr]">
+                  <div className="border-r border-border bg-muted/30">
+                    <div className="h-12 border-b border-border" />
+                    {timeSlots.map((minutes) => {
+                      const minutesFromStart = minutes - dayStartHour * 60;
+                      const label = minutes % 60 === 0
+                        ? formatTimeLabel(buildSlotDate(new Date(), minutesFromStart))
+                        : "";
+                      return (
+                        <div
+                          key={minutes}
+                          className="flex items-start justify-end pr-3 text-xs text-muted-foreground"
+                          style={{ height: slotHeight }}
+                        >
+                          {label}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className={`grid ${visibleDays.length === 7 ? "grid-cols-7" : "grid-cols-1"}`}>
+                    {visibleDays.map((day) => (
+                      <div key={day.toISOString()} className="border-r border-border last:border-r-0">
+                        <div className="h-12 border-b border-border px-3 flex items-center justify-between">
+                          <div className="text-sm font-medium">{formatDayLabel(day)}</div>
+                          {loadingBookings && (
+                            <span className="text-xs text-muted-foreground">Loading...</span>
+                          )}
+                        </div>
+                        <div
+                          className="relative"
+                          style={{ height: timeSlots.length * slotHeight }}
+                        >
+                          {timeSlots.map((minutes) => (
+                            <div
+                              key={minutes}
+                              className="availability-slot"
+                              style={{ height: slotHeight }}
+                              onClick={() => handleSlotSelect(day, minutes - dayStartHour * 60)}
+                            />
                           ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border bg-background">
-                        {timeSlots.map((time) => (
-                          <tr key={time}>
-                            <td className="px-4 py-2 text-xs font-medium text-muted-foreground whitespace-nowrap">
-                              {time}
-                            </td>
-                            {weekDays.map((_, dayIndex) => {
-                              const status = getSlotStatus(dayIndex, time);
-                              return (
-                                <td key={dayIndex} className="p-1">
-                                  <button
-                                    className={`w-full h-12 rounded border-2 transition-colors ${getSlotColor(
-                                      status
-                                    )}`}
-                                    title={`${status} - ${time}`}
-                                  />
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                          {eventsWithDates.map((event) => {
+                            const slice = getEventSlices(day, event);
+                            if (!slice) return null;
+                            const minutesFromStart =
+                              (slice.sliceStart.getTime() - slice.dayStart.getTime()) / 60000;
+                            const durationMinutes =
+                              (slice.sliceEnd.getTime() - slice.sliceStart.getTime()) / 60000;
+                            const top = minutesFromStart * pxPerMinute;
+                            const height = Math.max(durationMinutes * pxPerMinute, 18);
+                            const className =
+                              event.status === "PAID" ? "booking-paid" : "booking-pending";
 
-                {/* Legend */}
-                <div className="flex items-center gap-6 px-4 py-3 border-t border-border bg-muted/30">
-                  <span className="text-xs font-medium text-muted-foreground">Legend:</span>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded bg-green-100 border-2 border-green-300" />
-                    <span className="text-xs">Available</span>
-                  </div>
-                  {(selectedCourt === "all" || selectedCourt === "all-courts") ? (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded bg-orange-100 border-2 border-orange-300" />
-                        <span className="text-xs">Partly Booked</span>
+                            return (
+                              <div
+                                key={`${event.id}-${day.toISOString()}`}
+                                className={`booking-event ${className}`}
+                                style={{ top, height }}
+                              >
+                                <div className="text-xs font-medium">
+                                  {bookingLabel(event, viewMode)}
+                                </div>
+                                <div className="text-[11px] opacity-80">
+                                  {formatTimeLabel(slice.sliceStart)} - {formatTimeLabel(slice.sliceEnd)}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded bg-red-100 border-2 border-red-300" />
-                        <span className="text-xs">Fully Booked</span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 rounded bg-blue-100 border-2 border-blue-300" />
-                      <span className="text-xs">Booked</span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded bg-gray-100 border-2 border-gray-300" />
-                    <span className="text-xs">Blocked</span>
+                    ))}
                   </div>
                 </div>
               </CardContent>
@@ -263,51 +399,57 @@ const Availability = () => {
                 <CardTitle className="text-lg">Availability Rules</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {availabilityRules.map((rule) => (
-                  <div
-                    key={rule.id}
-                    className="p-4 rounded-lg border border-border hover:bg-muted/30 transition-colors"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h4 className="font-medium">{rule.name}</h4>
-                        <div className="flex gap-2 mt-2">
-                          {rule.courts.map((court) => (
-                            <Badge key={court} variant="secondary" className="text-xs">
-                              {court}
-                            </Badge>
-                          ))}
+                {availabilityRules.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+                    No rules or overrides yet
+                  </div>
+                ) : (
+                  availabilityRules.map((rule) => (
+                    <div
+                      key={rule.id}
+                      className="p-4 rounded-lg border border-border hover:bg-muted/30 transition-colors"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h4 className="font-medium">{rule.name}</h4>
+                          <div className="flex gap-2 mt-2">
+                            {rule.courts.map((court) => (
+                              <Badge key={court} variant="secondary" className="text-xs">
+                                {court}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="ghost" size="sm">
+                            Edit
+                          </Button>
+                          <Button variant="ghost" size="sm">
+                            Delete
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex gap-2">
-                        <Button variant="ghost" size="sm">
-                          Edit
-                        </Button>
-                        <Button variant="ghost" size="sm">
-                          Delete
-                        </Button>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Days:</span>
+                          <p className="font-medium">{rule.days}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Time:</span>
+                          <p className="font-medium">{rule.time}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Min duration:</span>
+                          <p className="font-medium">{rule.minDuration}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Lead time:</span>
+                          <p className="font-medium">{rule.leadTime}</p>
+                        </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Days:</span>
-                        <p className="font-medium">{rule.days}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Time:</span>
-                        <p className="font-medium">{rule.time}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Min duration:</span>
-                        <p className="font-medium">{rule.minDuration}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Lead time:</span>
-                        <p className="font-medium">{rule.leadTime}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </CardContent>
             </Card>
 

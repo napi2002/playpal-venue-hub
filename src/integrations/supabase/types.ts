@@ -79,6 +79,7 @@ export type Database = {
           created_at: string
           date: string
           duration: number
+          end_at: string | null
           id: string
           notes: string | null
           payment_status: string
@@ -86,6 +87,7 @@ export type Database = {
           player_name: string
           source: string
           sport: string
+          start_at: string | null
           status: Database["public"]["Enums"]["booking_status"]
           time: string
           updated_at: string
@@ -98,6 +100,7 @@ export type Database = {
           created_at?: string
           date: string
           duration?: number
+          end_at?: string | null
           id?: string
           notes?: string | null
           payment_status?: string
@@ -105,6 +108,7 @@ export type Database = {
           player_name: string
           source: string
           sport: string
+          start_at?: string | null
           status?: Database["public"]["Enums"]["booking_status"]
           time: string
           updated_at?: string
@@ -117,6 +121,7 @@ export type Database = {
           created_at?: string
           date?: string
           duration?: number
+          end_at?: string | null
           id?: string
           notes?: string | null
           payment_status?: string
@@ -124,6 +129,7 @@ export type Database = {
           player_name?: string
           source?: string
           sport?: string
+          start_at?: string | null
           status?: Database["public"]["Enums"]["booking_status"]
           time?: string
           updated_at?: string
@@ -150,35 +156,53 @@ export type Database = {
         Row: {
           buffer_minutes: number
           created_at: string
+          environment: string | null
+          has_lighting: boolean | null
           id: string
           name: string
           off_peak_price: number
           peak_price: number
+          sport_type: string | null
+          surface_type: string | null
           sport: string
           status: string
           venue_id: string | null
+          weekday_price_per_hour_thb: number | null
+          weekend_price_per_hour_thb: number | null
         }
         Insert: {
           buffer_minutes?: number
           created_at?: string
+          environment?: string | null
+          has_lighting?: boolean | null
           id?: string
           name: string
           off_peak_price: number
           peak_price: number
+          sport_type?: string | null
+          surface_type?: string | null
           sport: string
           status?: string
           venue_id?: string | null
+          weekday_price_per_hour_thb?: number | null
+          weekend_price_per_hour_thb?: number | null
         }
         Update: {
           buffer_minutes?: number
           created_at?: string
+          environment?: string | null
+          has_lighting?: boolean | null
           id?: string
           name?: string
           off_peak_price?: number
           peak_price?: number
+          sport_type?: string | null
+          surface_type?: string | null
           sport?: string
           status?: string
           venue_id?: string | null
+          weekday_price_per_hour_thb?: number | null
+          weekend_price_per_hour_thb?: number | null
         }
         Relationships: [
           {
@@ -542,48 +566,84 @@ export type Database = {
       venues: {
         Row: {
           address: string | null
+          address_line1: string | null
           city: string | null
           country: string | null
           created_at: string
           currency: string | null
+          default_slot_duration_mins: number | null
           email: string | null
+          google_maps_url: string | null
           id: string
+          name_en: string | null
+          name_th: string | null
           name: string
           phone: string | null
+          postcode: string | null
+          province: string | null
           slug: string
           status: string | null
+          tax_information: string | null
           timezone: string | null
           updated_at: string
+          venue_type: string | null
+          district: string | null
+          subdistrict: string | null
+          opening_hours: Json | null
         }
         Insert: {
           address?: string | null
+          address_line1?: string | null
           city?: string | null
           country?: string | null
           created_at?: string
           currency?: string | null
+          default_slot_duration_mins?: number | null
           email?: string | null
+          google_maps_url?: string | null
           id?: string
+          name_en?: string | null
+          name_th?: string | null
           name: string
           phone?: string | null
+          postcode?: string | null
+          province?: string | null
           slug: string
           status?: string | null
+          tax_information?: string | null
           timezone?: string | null
           updated_at?: string
+          venue_type?: string | null
+          district?: string | null
+          subdistrict?: string | null
+          opening_hours?: Json | null
         }
         Update: {
           address?: string | null
+          address_line1?: string | null
           city?: string | null
           country?: string | null
           created_at?: string
           currency?: string | null
+          default_slot_duration_mins?: number | null
           email?: string | null
+          google_maps_url?: string | null
           id?: string
+          name_en?: string | null
+          name_th?: string | null
           name?: string
           phone?: string | null
+          postcode?: string | null
+          province?: string | null
           slug?: string
           status?: string | null
+          tax_information?: string | null
           timezone?: string | null
           updated_at?: string
+          venue_type?: string | null
+          district?: string | null
+          subdistrict?: string | null
+          opening_hours?: Json | null
         }
         Relationships: []
       }
@@ -592,6 +652,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_venue_for_user: {
+        Args: {
+          _address?: string | null
+          _email?: string | null
+          _name?: string | null
+          _phone?: string | null
+          _tax_information?: string | null
+          _timezone?: string | null
+        }
+        Returns: Database["public"]["Tables"]["venues"]["Row"]
+      }
       generate_booking_number: { Args: never; Returns: string }
       generate_bookings_from_recurring: {
         Args: { _recurring_booking_id: string; _weeks_ahead?: number }

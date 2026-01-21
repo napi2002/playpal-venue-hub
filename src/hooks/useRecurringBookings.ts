@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
+import { useAuthSession } from "@/contexts/AuthContext";
 
 type RecurringBooking = Tables<"recurring_bookings">;
 type RecurringBookingInsert = TablesInsert<"recurring_bookings">;
@@ -10,9 +11,13 @@ type RecurringBookingUpdate = TablesUpdate<"recurring_bookings">;
 export const useRecurringBookings = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { session } = useAuthSession();
+  const getErrorMessage = (error: unknown, fallback: string) =>
+    error instanceof Error && error.message ? error.message : fallback;
 
   const { data: recurringBookings = [], isLoading } = useQuery({
-    queryKey: ["recurring_bookings"],
+    queryKey: ["recurring_bookings", session?.user?.id],
+    enabled: !!session?.user?.id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("recurring_bookings")
@@ -43,10 +48,10 @@ export const useRecurringBookings = () => {
         description: "The recurring booking has been added successfully",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error, "Failed to create recurring booking"),
         variant: "destructive",
       });
     },
@@ -71,10 +76,10 @@ export const useRecurringBookings = () => {
         description: "The recurring booking has been updated successfully",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error, "Failed to update recurring booking"),
         variant: "destructive",
       });
     },
@@ -96,10 +101,10 @@ export const useRecurringBookings = () => {
         description: "The recurring booking has been removed successfully",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error, "Failed to delete recurring booking"),
         variant: "destructive",
       });
     },
@@ -122,10 +127,10 @@ export const useRecurringBookings = () => {
         description: `Successfully created ${count} bookings from recurring rule`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error, "Failed to generate bookings"),
         variant: "destructive",
       });
     },

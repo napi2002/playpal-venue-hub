@@ -126,3 +126,23 @@ All colors MUST be HSL.
     @apply transition-all duration-200 ease-in-out;
   }
 }
+
+@layer components {
+  .availability-slot {
+    @apply border-b border-border/70 cursor-pointer hover:bg-muted/40 transition-colors;
+  }
+
+  .booking-event {
+    @apply absolute left-2 right-2 rounded-md px-2 py-1 shadow-sm;
+    color: #111827;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+  }
+
+  .booking-pending {
+    background-color: #FBBF24;
+  }
+
+  .booking-paid {
+    background-color: #22C55E;
+  }
+}

@@ -42,15 +42,18 @@ import { AddBookingDialog } from "@/components/AddBookingDialog";
 import { AddRecurringBookingDialog } from "@/components/AddRecurringBookingDialog";
 import { useBookings } from "@/hooks/useBookings";
 import { format } from "date-fns";
+import type { Database } from "@/integrations/supabase/types";
+
+type BookingStatus = Database["public"]["Enums"]["booking_status"];
 
 const Bookings = () => {
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | BookingStatus>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
   const [recurringDialogOpen, setRecurringDialogOpen] = useState(false);
   const { bookings, isLoading, updateBooking, deleteBooking } = useBookings();
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: BookingStatus) => {
     switch (status) {
       case "paid":
       case "confirmed":
@@ -97,10 +100,10 @@ const Bookings = () => {
     }
   };
 
-  const handleStatusChange = (bookingId: string, status: string) => {
+  const handleStatusChange = (bookingId: string, status: BookingStatus) => {
     updateBooking({ 
       id: bookingId, 
-      updates: { status: status as any } 
+      updates: { status }
     });
   };
 

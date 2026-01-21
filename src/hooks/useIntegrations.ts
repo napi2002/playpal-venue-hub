@@ -1,13 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { useAuthSession } from "@/contexts/AuthContext";
 
 export interface Integration {
   id: string;
   venue_id: string;
   integration_type: string;
   is_enabled: boolean;
-  config: any;
+  config: unknown;
   credentials_encrypted: string | null;
   last_sync_at: string | null;
   created_at: string;
@@ -16,9 +17,13 @@ export interface Integration {
 
 export const useIntegrations = () => {
   const queryClient = useQueryClient();
+  const { session } = useAuthSession();
+  const getErrorMessage = (error: unknown, fallback: string) =>
+    error instanceof Error && error.message ? error.message : fallback;
 
   const { data: integrations = [], isLoading } = useQuery({
-    queryKey: ["integrations"],
+    queryKey: ["integrations", session?.user?.id],
+    enabled: !!session?.user?.id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("integrations")
@@ -42,8 +47,8 @@ export const useIntegrations = () => {
       queryClient.invalidateQueries({ queryKey: ["integrations"] });
       toast.success("Integration updated successfully");
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Failed to update integration");
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, "Failed to update integration"));
     },
   });
 
@@ -58,8 +63,8 @@ export const useIntegrations = () => {
       queryClient.invalidateQueries({ queryKey: ["integrations"] });
       toast.success("Integration added successfully");
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Failed to add integration");
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, "Failed to add integration"));
     },
   });
 

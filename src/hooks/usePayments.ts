@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { useAuthSession } from "@/contexts/AuthContext";
 
 export interface Payment {
   id: string;
@@ -15,7 +16,7 @@ export interface Payment {
   paid_at: string | null;
   refund_amount: number | null;
   refunded_at: string | null;
-  metadata: any;
+  metadata: unknown;
   created_at: string;
   updated_at: string;
   bookings?: {
@@ -29,9 +30,13 @@ export interface Payment {
 
 export const usePayments = () => {
   const queryClient = useQueryClient();
+  const { session } = useAuthSession();
+  const getErrorMessage = (error: unknown, fallback: string) =>
+    error instanceof Error && error.message ? error.message : fallback;
 
   const { data: payments = [], isLoading } = useQuery({
-    queryKey: ["payments"],
+    queryKey: ["payments", session?.user?.id],
+    enabled: !!session?.user?.id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("payments")
@@ -64,8 +69,8 @@ export const usePayments = () => {
       queryClient.invalidateQueries({ queryKey: ["payments"] });
       toast.success("Payment updated successfully");
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Failed to update payment");
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, "Failed to update payment"));
     },
   });
 
@@ -85,8 +90,8 @@ export const usePayments = () => {
       queryClient.invalidateQueries({ queryKey: ["payments"] });
       toast.success("Payment refunded successfully");
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Failed to refund payment");
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, "Failed to refund payment"));
     },
   });
 

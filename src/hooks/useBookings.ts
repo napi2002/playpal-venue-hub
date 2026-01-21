@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
+import { useAuthSession } from "@/contexts/AuthContext";
 
 type Booking = Tables<"bookings">;
 type BookingInsert = TablesInsert<"bookings">;
@@ -10,9 +11,13 @@ type BookingUpdate = TablesUpdate<"bookings">;
 export const useBookings = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { session } = useAuthSession();
+  const getErrorMessage = (error: unknown, fallback: string) =>
+    error instanceof Error && error.message ? error.message : fallback;
 
   const { data: bookings = [], isLoading } = useQuery({
-    queryKey: ["bookings"],
+    queryKey: ["bookings", session?.user?.id],
+    enabled: !!session?.user?.id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("bookings")
@@ -43,10 +48,10 @@ export const useBookings = () => {
         description: "The booking has been added successfully",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error, "Failed to create booking"),
         variant: "destructive",
       });
     },
@@ -71,10 +76,10 @@ export const useBookings = () => {
         description: "The booking has been updated successfully",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error, "Failed to update booking"),
         variant: "destructive",
       });
     },
@@ -96,10 +101,10 @@ export const useBookings = () => {
         description: "The booking has been removed successfully",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error, "Failed to delete booking"),
         variant: "destructive",
       });
     },
@@ -108,7 +113,7 @@ export const useBookings = () => {
   return {
     bookings,
     isLoading,
-    addBooking: addBooking.mutate,
+    addBooking: addBooking.mutateAsync,
     updateBooking: updateBooking.mutate,
     deleteBooking: deleteBooking.mutate,
   };

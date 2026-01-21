@@ -10,8 +10,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 
 const Login = () => {
-  const [email, setEmail] = useState("admin@playpal.com");
-  const [password, setPassword] = useState("Admin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const navigate = useNavigate();
@@ -124,7 +124,7 @@ const Login = () => {
           </div>
 
           <p className="text-center text-sm text-muted-foreground mt-2">
-            {isSignUp ? "Use admin@playpal.com / Admin to create the admin account" : "Default credentials: admin@playpal.com / Admin"}
+            Use your Supabase auth credentials to sign in.
           </p>
         </CardContent>
       </Card>

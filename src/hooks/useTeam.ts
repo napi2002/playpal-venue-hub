@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { useAuthSession } from "@/contexts/AuthContext";
 
 export interface TeamMember {
   id: string;
@@ -20,9 +21,13 @@ export interface TeamMember {
 
 export const useTeam = () => {
   const queryClient = useQueryClient();
+  const { session } = useAuthSession();
+  const getErrorMessage = (error: unknown, fallback: string) =>
+    error instanceof Error && error.message ? error.message : fallback;
 
   const { data: teamMembers = [], isLoading } = useQuery({
-    queryKey: ["team"],
+    queryKey: ["team", session?.user?.id],
+    enabled: !!session?.user?.id,
     queryFn: async () => {
       const { data: profiles, error: profilesError } = await supabase
         .from("user_profiles")
@@ -84,8 +89,8 @@ export const useTeam = () => {
       queryClient.invalidateQueries({ queryKey: ["team"] });
       toast.success("Role updated successfully");
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Failed to update role");
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, "Failed to update role"));
     },
   });
 
@@ -101,8 +106,8 @@ export const useTeam = () => {
       queryClient.invalidateQueries({ queryKey: ["team"] });
       toast.success("Role removed successfully");
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Failed to remove role");
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, "Failed to remove role"));
     },
   });
 
