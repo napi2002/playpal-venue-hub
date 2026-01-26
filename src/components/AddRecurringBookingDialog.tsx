@@ -167,7 +167,7 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="amount">Amount ($)</Label>
+              <Label htmlFor="amount">Amount (THB)</Label>
               <Input
                 id="amount"
                 value={formData.amount}

@@ -4,6 +4,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   MapPin,
   Phone,
@@ -19,16 +33,41 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useVenue } from "@/hooks/useVenue";
 import { useCourts } from "@/hooks/useCourts";
 import { usePhotos } from "@/hooks/usePhotos";
+import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 
 const Venue = () => {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const { venue, isLoading, updateVenue, createVenue, isSaving } = useVenue();
   const { courts, isLoading: isCourtsLoading } = useCourts();
   const { photos, isLoading: isPhotosLoading } = usePhotos();
   const [isEditing, setIsEditing] = useState(false);
+  const [editingCourt, setEditingCourt] = useState<null | {
+    id: string;
+    name: string;
+    sport: string | null;
+    sport_type: string | null;
+    status: string | null;
+    environment: string | null;
+    weekday_price_per_hour_thb: number | null;
+    weekend_price_per_hour_thb: number | null;
+    off_peak_price: number | null;
+    peak_price: number | null;
+  }>(null);
+  const [courtForm, setCourtForm] = useState({
+    name: "",
+    sport: "",
+    status: "active",
+    environment: "",
+    weekdayPrice: "",
+    weekendPrice: "",
+  });
+  const [isSavingCourt, setIsSavingCourt] = useState(false);
   const [formData, setFormData] = useState({
     name_en: "",
     name_th: "",
-    venue_type: "",
     timezone: "",
     address_line1: "",
     subdistrict: "",
@@ -41,15 +80,31 @@ const Venue = () => {
     tax_information: "",
     default_slot_duration_mins: "",
   });
+  const [selectedSports, setSelectedSports] = useState<string[]>([]);
+  const [sportsMenuOpen, setSportsMenuOpen] = useState(false);
+
+  const sportOptions = [
+    "TENNIS",
+    "BADMINTON",
+    "PADEL",
+    "PICKLEBALL",
+    "BASKETBALL",
+    "FOOTBALL",
+    "CLIMBING",
+    "VOLLEYBALL",
+    "SQUASH",
+  ];
+  const venueTypeOptions = new Set(["TENNIS", "PADEL", "BADMINTON", "MULTI_SPORT"]);
 
   const sportsSupported = useMemo(() => {
+    if (selectedSports.length > 0) return selectedSports;
     const unique = new Set<string>();
     courts.forEach((court) => {
       const sport = court.sport_type || court.sport;
-      if (sport) unique.add(sport);
+      if (sport) unique.add(String(sport).toUpperCase());
     });
     return Array.from(unique);
-  }, [courts]);
+  }, [courts, selectedSports]);
 
   const coverPhoto = useMemo(
     () => photos.find((photo) => photo.type === "COVER"),
@@ -93,10 +148,16 @@ const Venue = () => {
 
   useEffect(() => {
     if (venue) {
+      const sportsFromVenue = (venue as typeof venue & { sports_supported?: string[] | null })
+        ?.sports_supported;
+      const normalizedSports = Array.isArray(sportsFromVenue)
+        ? sportsFromVenue.map((sport) => String(sport).toUpperCase())
+        : venue.venue_type
+          ? [String(venue.venue_type)]
+          : [];
       setFormData({
         name_en: venue.name_en ?? venue.name ?? "",
         name_th: venue.name_th ?? "",
-        venue_type: venue.venue_type ?? "",
         timezone: venue.timezone ?? "",
         address_line1: venue.address_line1 ?? venue.address ?? "",
         subdistrict: venue.subdistrict ?? "",
@@ -110,6 +171,7 @@ const Venue = () => {
         default_slot_duration_mins:
           venue.default_slot_duration_mins != null ? String(venue.default_slot_duration_mins) : "",
       });
+      setSelectedSports(normalizedSports);
     }
   }, [venue]);
 
@@ -118,13 +180,111 @@ const Venue = () => {
     return trimmed.length ? trimmed : null;
   };
 
+  const handleEditCourt = (court: typeof courts[number]) => {
+    const sportValue = court.sport_type ?? court.sport ?? "";
+    const normalizedSport =
+      typeof sportValue === "string" ? sportValue.toUpperCase() : sportValue;
+    const environmentValue = court.environment ?? "";
+    setEditingCourt({
+      id: court.id,
+      name: court.name ?? "",
+      sport: court.sport ?? null,
+      sport_type: court.sport_type ?? null,
+      status: court.status ?? "active",
+      environment: court.environment ?? null,
+      weekday_price_per_hour_thb: court.weekday_price_per_hour_thb ?? null,
+      weekend_price_per_hour_thb: court.weekend_price_per_hour_thb ?? null,
+      off_peak_price: court.off_peak_price ?? null,
+      peak_price: court.peak_price ?? null,
+    });
+    setCourtForm({
+      name: court.name ?? "",
+      sport: normalizedSport || "",
+      status: court.status ?? "active",
+      environment: typeof environmentValue === "string" ? environmentValue.toUpperCase() : "",
+      weekdayPrice: String(
+        court.weekday_price_per_hour_thb ?? court.off_peak_price ?? "",
+      ),
+      weekendPrice: String(
+        court.weekend_price_per_hour_thb ?? court.peak_price ?? "",
+      ),
+    });
+  };
+
+  const handleSaveCourt = async () => {
+    if (!editingCourt) return;
+    if (!courtForm.name.trim()) {
+      toast({ title: "Court name is required", variant: "destructive" });
+      return;
+    }
+
+    setIsSavingCourt(true);
+    try {
+      const sportType =
+        courtForm.sport === "TENNIS" ||
+        courtForm.sport === "PADEL" ||
+        courtForm.sport === "BADMINTON"
+          ? courtForm.sport
+          : null;
+      const environmentType =
+        courtForm.environment === "INDOOR" ||
+        courtForm.environment === "OUTDOOR" ||
+        courtForm.environment === "COVERED"
+          ? courtForm.environment
+          : null;
+      const payload = {
+        name: courtForm.name.trim(),
+        sport: sportType ?? (courtForm.sport.trim() || null),
+        sport_type: sportType,
+        status: courtForm.status || "active",
+        environment: environmentType,
+        weekday_price_per_hour_thb: courtForm.weekdayPrice
+          ? Number(courtForm.weekdayPrice)
+          : null,
+        weekend_price_per_hour_thb: courtForm.weekendPrice
+          ? Number(courtForm.weekendPrice)
+          : null,
+      };
+
+      const { error } = await supabase
+        .from("courts")
+        .update(payload)
+        .eq("id", editingCourt.id);
+
+      if (error) throw error;
+
+      toast({ title: "Court updated" });
+      setEditingCourt(null);
+      queryClient.invalidateQueries({ queryKey: ["courts"] });
+    } catch (error) {
+      toast({
+        title: "Failed to update court",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingCourt(false);
+    }
+  };
+
+  const selectableSports = selectedSports.length > 0 ? selectedSports : sportOptions;
+
   const handleSave = async () => {
     const nameValue = formData.name_en.trim() || venue?.name || "New Venue";
+    const normalizedSelected = selectedSports.map((sport) => String(sport).toUpperCase());
+    const firstSport = normalizedSelected[0] ?? null;
+    const venueType =
+      normalizedSelected.length === 1 && firstSport && venueTypeOptions.has(firstSport)
+        ? firstSport
+        : normalizedSelected.length > 1
+          ? "MULTI_SPORT"
+          : venue?.venue_type ?? null;
     const updates = {
       name: nameValue,
       name_en: nameValue,
       name_th: toNullableValue(formData.name_th),
-      venue_type: toNullableValue(formData.venue_type),
+      venue_type: venueType,
+      sports_supported: normalizedSelected,
       timezone: toNullableValue(formData.timezone),
       address_line1: toNullableValue(formData.address_line1),
       subdistrict: toNullableValue(formData.subdistrict),
@@ -158,10 +318,16 @@ const Venue = () => {
 
   const handleCancel = () => {
     if (venue) {
+      const sportsFromVenue = (venue as typeof venue & { sports_supported?: string[] | null })
+        ?.sports_supported;
+      const normalizedSports = Array.isArray(sportsFromVenue)
+        ? sportsFromVenue.map((sport) => String(sport).toUpperCase())
+        : venue.venue_type
+          ? [String(venue.venue_type)]
+          : [];
       setFormData({
         name_en: venue.name_en ?? venue.name ?? "",
         name_th: venue.name_th ?? "",
-        venue_type: venue.venue_type ?? "",
         timezone: venue.timezone ?? "",
         address_line1: venue.address_line1 ?? venue.address ?? "",
         subdistrict: venue.subdistrict ?? "",
@@ -175,6 +341,7 @@ const Venue = () => {
         default_slot_duration_mins:
           venue.default_slot_duration_mins != null ? String(venue.default_slot_duration_mins) : "",
       });
+      setSelectedSports(normalizedSports);
     }
     setIsEditing(false);
   };
@@ -262,13 +429,56 @@ const Venue = () => {
 
                 <div className="grid gap-6 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Venue type</Label>
-                    <Input
-                      value={formData.venue_type}
-                      placeholder={isLoading ? "Loading..." : "Not set"}
-                      onChange={(e) => setFormData({ ...formData, venue_type: e.target.value })}
-                      readOnly={isReadOnly}
-                    />
+                    <Label>Sports offered</Label>
+                    <DropdownMenu open={sportsMenuOpen} onOpenChange={setSportsMenuOpen}>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="outline"
+                          disabled={isReadOnly}
+                          className="w-full justify-between"
+                        >
+                          {selectedSports.length
+                            ? `${selectedSports.length} selected`
+                            : "Select sports"}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-56">
+                        {sportOptions.map((sport) => (
+                          <DropdownMenuCheckboxItem
+                            key={sport}
+                            checked={selectedSports.includes(sport)}
+                            onSelect={(event) => event.preventDefault()}
+                            onCheckedChange={(value) => {
+                              setSelectedSports((prev) =>
+                                value
+                                  ? [...prev, sport]
+                                  : prev.filter((item) => item !== sport),
+                              );
+                            }}
+                          >
+                            {sport}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                        <div className="px-2 py-2">
+                          <Button
+                            variant="cta"
+                            size="sm"
+                            className="w-full"
+                            onClick={() => setSportsMenuOpen(false)}
+                          >
+                            Done
+                          </Button>
+                        </div>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    {selectedSports.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {selectedSports.join(", ")}
+                      </p>
+                    )}
+                    {selectedSports.length === 0 && (
+                      <p className="text-xs text-muted-foreground">Select at least one sport.</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Default slot duration (mins)</Label>
@@ -482,7 +692,12 @@ const Venue = () => {
                         </div>
                       </div>
                       <div className="flex gap-2 pt-2">
-                        <Button variant="outline" size="sm" className="flex-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => handleEditCourt(court)}
+                        >
                           <Edit className="mr-2 h-4 w-4" />
                           Edit
                         </Button>
@@ -497,9 +712,9 @@ const Venue = () => {
             </div>
           </TabsContent>
 
-          {/* Photos */}
-          <TabsContent value="photos">
-            <Card className="shadow-sm">
+      {/* Photos */}
+      <TabsContent value="photos">
+        <Card className="shadow-sm">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle>Venue Photos</CardTitle>
@@ -611,6 +826,103 @@ const Venue = () => {
           </TabsContent>
         </Tabs>
       </div>
+
+      <Dialog open={Boolean(editingCourt)} onOpenChange={(open) => !open && setEditingCourt(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit court</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label>Court name</Label>
+              <Input
+                value={courtForm.name}
+                onChange={(e) => setCourtForm({ ...courtForm, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Sport</Label>
+              <Select
+                value={courtForm.sport}
+                onValueChange={(value) => setCourtForm({ ...courtForm, sport: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select sport" />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectableSports.map((sport) => (
+                    <SelectItem key={sport} value={sport}>
+                      {sport}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedSports.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Select venue sports first to filter this list.
+                </p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Weekday price (THB)</Label>
+                <Input
+                  value={courtForm.weekdayPrice}
+                  onChange={(e) => setCourtForm({ ...courtForm, weekdayPrice: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Weekend price (THB)</Label>
+                <Input
+                  value={courtForm.weekendPrice}
+                  onChange={(e) => setCourtForm({ ...courtForm, weekendPrice: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Environment</Label>
+                <Select
+                  value={courtForm.environment}
+                  onValueChange={(value) => setCourtForm({ ...courtForm, environment: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="INDOOR">Indoor</SelectItem>
+                    <SelectItem value="OUTDOOR">Outdoor</SelectItem>
+                    <SelectItem value="COVERED">Covered</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select
+                  value={courtForm.status}
+                  onValueChange={(value) => setCourtForm({ ...courtForm, status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingCourt(null)}>
+              Cancel
+            </Button>
+            <Button variant="cta" onClick={handleSaveCourt} disabled={isSavingCourt}>
+              {isSavingCourt ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,8 +41,10 @@ import {
 import { AddBookingDialog } from "@/components/AddBookingDialog";
 import { AddRecurringBookingDialog } from "@/components/AddRecurringBookingDialog";
 import { useBookings } from "@/hooks/useBookings";
+import { useRecurringBookings } from "@/hooks/useRecurringBookings";
 import { format } from "date-fns";
 import type { Database } from "@/integrations/supabase/types";
+import { useLocation } from "react-router-dom";
 
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
 
@@ -51,7 +53,10 @@ const Bookings = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
   const [recurringDialogOpen, setRecurringDialogOpen] = useState(false);
+  const location = useLocation();
   const { bookings, isLoading, updateBooking, deleteBooking } = useBookings();
+  const { recurringBookings, isLoading: isRecurringLoading, deleteRecurringBooking } =
+    useRecurringBookings();
 
   const getStatusColor = (status: BookingStatus) => {
     switch (status) {
@@ -100,6 +105,16 @@ const Bookings = () => {
     }
   };
 
+  const dayLabel = (day: number) => {
+    const labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return labels[day] ?? "—";
+  };
+
+  const recurringCourtName = (recurring: typeof recurringBookings[number]) => {
+    const withCourt = recurring as typeof recurring & { courts?: { name?: string } };
+    return withCourt.courts?.name || recurring.court_id;
+  };
+
   const handleStatusChange = (bookingId: string, status: BookingStatus) => {
     updateBooking({ 
       id: bookingId, 
@@ -112,6 +127,19 @@ const Bookings = () => {
       deleteBooking(bookingId);
     }
   };
+
+  const handleRecurringDelete = (bookingId: string) => {
+    if (confirm("Delete this recurring booking?")) {
+      deleteRecurringBooking(bookingId);
+    }
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("create") === "1") {
+      setBookingDialogOpen(true);
+    }
+  }, [location.search]);
 
   return (
     <DashboardLayout>
@@ -169,6 +197,83 @@ const Bookings = () => {
                   <SelectItem value="cancelled">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Recurring Bookings */}
+        <Card className="shadow-sm">
+          <CardContent className="p-0">
+            <div className="border-b border-border px-4 py-3">
+              <h2 className="text-base font-semibold">Recurring bookings</h2>
+              <p className="text-sm text-muted-foreground">
+                {recurringBookings.length} recurring schedules
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead>Court</TableHead>
+                    <TableHead>Day</TableHead>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead>Player</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="w-[50px]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isRecurringLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8">
+                        Loading recurring bookings...
+                      </TableCell>
+                    </TableRow>
+                  ) : recurringBookings.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        No recurring bookings set
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    recurringBookings.map((recurring) => (
+                      <TableRow key={recurring.id} className="hover:bg-muted/30">
+                        <TableCell>{recurringCourtName(recurring)}</TableCell>
+                        <TableCell>{dayLabel(recurring.day_of_week)}</TableCell>
+                        <TableCell className="whitespace-nowrap">{recurring.time}</TableCell>
+                        <TableCell>{recurring.duration} mins</TableCell>
+                        <TableCell>{recurring.player_name}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={getStatusColor(recurring.status)}>
+                            {recurring.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-medium">฿{recurring.amount}</TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onClick={() => handleRecurringDelete(recurring.id)}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
           </CardContent>
         </Card>
@@ -244,7 +349,7 @@ const Bookings = () => {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          ${booking.amount}
+                          ฿{booking.amount}
                         </TableCell>
                         <TableCell>
                           <DropdownMenu>

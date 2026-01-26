@@ -10,6 +10,8 @@ import Venue from "./pages/Venue";
 import Availability from "./pages/Availability";
 import Bookings from "./pages/Bookings";
 import Payments from "./pages/Payments";
+import Membership from "./pages/Membership";
+import PlayerProfile from "./pages/PlayerProfile";
 import Integrations from "./pages/Integrations";
 import Team from "./pages/Team";
 import Reports from "./pages/Reports";
@@ -37,6 +39,8 @@ const App = () => (
             <Route path="/availability" element={<ProtectedRoute><Availability /></ProtectedRoute>} />
             <Route path="/bookings" element={<ProtectedRoute><Bookings /></ProtectedRoute>} />
             <Route path="/payments" element={<ProtectedRoute><Payments /></ProtectedRoute>} />
+            <Route path="/membership" element={<ProtectedRoute><Membership /></ProtectedRoute>} />
+            <Route path="/membership/:playerId" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />
             <Route path="/integrations" element={<ProtectedRoute><Integrations /></ProtectedRoute>} />
             <Route path="/team" element={<ProtectedRoute><Team /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />

@@ -3,6 +3,9 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -21,22 +24,34 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AddBookingDialog } from "@/components/AddBookingDialog";
 import { useCourts } from "@/hooks/useCourts";
+import { useRecurringBookings } from "@/hooks/useRecurringBookings";
 import { useVenue } from "@/hooks/useVenue";
 import { apiFetch } from "@/lib/apiClient";
 import { addDays, addMinutes, addWeeks, format, startOfDay, startOfWeek } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { BookingEvent, BookingStatus } from "@/types/availability";
+import { supabase } from "@/integrations/supabase/client";
 
 const Availability = () => {
   const [selectedCourt, setSelectedCourt] = useState("all");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<"week" | "day">("week");
   const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
+  const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
   const [bookingEvents, setBookingEvents] = useState<BookingEvent[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
   const { courts } = useCourts();
+  const { recurringBookings, isLoading: isRecurringLoading } = useRecurringBookings();
   const { venue } = useVenue();
   const { toast } = useToast();
+  const [overrideForm, setOverrideForm] = useState({
+    date: new Date().toISOString().split("T")[0],
+    startTime: "09:00",
+    endTime: "10:00",
+    courtId: "",
+    sport: "",
+    eventName: "",
+  });
 
   const availabilityRules: {
     id: number;
@@ -50,10 +65,50 @@ const Availability = () => {
   }[] = [];
 
   const slotMinutes = 30;
-  const dayStartHour = 6;
-  const dayEndHour = 22;
+  const defaultStartMinutes = 6 * 60;
+  const defaultEndMinutes = 22 * 60;
   const slotHeight = 24;
   const pxPerMinute = slotHeight / slotMinutes;
+
+  const openingHours = useMemo(() => {
+    return venue?.opening_hours as
+      | Record<string, { isOpen: boolean; openTime: string; closeTime: string }>
+      | null
+      | undefined;
+  }, [venue]);
+
+  const weekdayFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Bangkok",
+        weekday: "short",
+      }),
+    [],
+  );
+
+  const parseTimeToMinutes = (value?: string | null) => {
+    if (!value) return null;
+    const [hours, minutes] = value.split(":").map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+    return hours * 60 + minutes;
+  };
+
+  const getDayHours = useCallback(
+    (day: Date) => {
+      const weekdayKey = weekdayFormatter.format(day);
+      const entry = openingHours?.[weekdayKey];
+      if (!entry?.isOpen) {
+        return null;
+      }
+      const openMinutes = parseTimeToMinutes(entry.openTime);
+      const closeMinutes = parseTimeToMinutes(entry.closeTime);
+      if (openMinutes === null || closeMinutes === null || openMinutes >= closeMinutes) {
+        return null;
+      }
+      return { openMinutes, closeMinutes, weekdayKey };
+    },
+    [openingHours, weekdayFormatter],
+  );
 
   const weekStart = useMemo(
     () => startOfWeek(currentDate, { weekStartsOn: 1 }),
@@ -73,24 +128,134 @@ const Availability = () => {
     [visibleDays],
   );
 
+  const dayBounds = useMemo(() => {
+    const openTimes = visibleDays
+      .map((day) => getDayHours(day))
+      .filter((entry): entry is { openMinutes: number; closeMinutes: number } => Boolean(entry));
+
+    if (!openTimes.length) {
+      return { startMinutes: defaultStartMinutes, endMinutes: defaultEndMinutes };
+    }
+
+    const rawStart = Math.min(...openTimes.map((entry) => entry.openMinutes));
+    const rawEnd = Math.max(...openTimes.map((entry) => entry.closeMinutes));
+    const roundedStart = Math.floor(rawStart / slotMinutes) * slotMinutes;
+    const roundedEnd = Math.ceil(rawEnd / slotMinutes) * slotMinutes;
+    return {
+      startMinutes: roundedStart,
+      endMinutes: Math.max(roundedEnd, roundedStart + slotMinutes),
+    };
+  }, [defaultEndMinutes, defaultStartMinutes, getDayHours, slotMinutes, visibleDays]);
+
   const timeSlots = useMemo(() => {
     const slots: number[] = [];
-    for (let hour = dayStartHour; hour < dayEndHour; hour += 1) {
-      for (let minutes = 0; minutes < 60; minutes += slotMinutes) {
-        slots.push(hour * 60 + minutes);
-      }
+    for (let minutes = dayBounds.startMinutes; minutes < dayBounds.endMinutes; minutes += slotMinutes) {
+      slots.push(minutes);
     }
     return slots;
-  }, []);
+  }, [dayBounds.endMinutes, dayBounds.startMinutes, slotMinutes]);
+
+  const generateBookingNumber = () => {
+    const timestamp = Date.now().toString().slice(-6);
+    const random = Math.floor(Math.random() * 90) + 10;
+    return `BK${timestamp}${random}`;
+  };
+
+  const toBangkokUtcIso = (date: string, time: string) => {
+    const [year, month, day] = date.split("-").map(Number);
+    const [hour, minute] = time.split(":").map(Number);
+    const utcDate = new Date(Date.UTC(year, month - 1, day, hour - 7, minute, 0));
+    return utcDate.toISOString();
+  };
+
+  const recurringEvents = useMemo(() => {
+    if (!recurringBookings.length) return [];
+
+    const dayLabels = Array.from({ length: 7 }, (_, index) => index);
+    const days: string[] = [];
+    const weekdayByDate = new Map<string, number>();
+    const weekdayFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Bangkok",
+      weekday: "short",
+    });
+    const weekdayIndex = new Map([
+      ["Sun", 0],
+      ["Mon", 1],
+      ["Tue", 2],
+      ["Wed", 3],
+      ["Thu", 4],
+      ["Fri", 5],
+      ["Sat", 6],
+    ]);
+    for (let idx = 0; idx < visibleDays.length; idx += 1) {
+      const dateKey = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Bangkok",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(visibleDays[idx]);
+      days.push(dateKey);
+      const weekdayLabel = weekdayFormatter.format(visibleDays[idx]);
+      const weekdayValue = weekdayIndex.get(weekdayLabel);
+      if (weekdayValue !== undefined) {
+        weekdayByDate.set(dateKey, weekdayValue);
+      }
+    }
+
+    const byCourt = new Map(courts.map((court) => [court.id, court.name]));
+
+    return recurringBookings.flatMap((recurring) => {
+      if (recurring.status === "cancelled") return [];
+      if (selectedCourt !== "all" && recurring.court_id !== selectedCourt) return [];
+
+      const recurrenceStart = recurring.start_date;
+      const recurrenceEnd = recurring.end_date ?? null;
+      const bookingDay = Number(recurring.day_of_week);
+      if (!dayLabels.includes(bookingDay)) return [];
+
+      return days.flatMap((dateKey) => {
+        if (dateKey < recurrenceStart) return [];
+        if (recurrenceEnd && dateKey > recurrenceEnd) return [];
+
+        const dayCheck = weekdayByDate.get(dateKey);
+        if (dayCheck === undefined || dayCheck !== bookingDay) return [];
+
+        const startAt = toBangkokUtcIso(dateKey, recurring.time);
+        const endAt = new Date(
+          new Date(startAt).getTime() + Number(recurring.duration) * 60000,
+        ).toISOString();
+
+        return [
+          {
+            id: `${recurring.id}-${dateKey}`,
+            courtId: recurring.court_id,
+            courtName: byCourt.get(recurring.court_id) || "Court",
+            start: startAt,
+            end: endAt,
+            eventName: recurring.player_name,
+            status:
+              recurring.status === "paid" || recurring.status === "confirmed"
+                ? "PAID"
+                : "PENDING",
+          },
+        ];
+      });
+    });
+  }, [courts, recurringBookings, selectedCourt, visibleDays]);
+
+  const mergedEvents = useMemo(
+    () => [...bookingEvents, ...recurringEvents],
+    [bookingEvents, recurringEvents],
+  );
 
   const eventsWithDates = useMemo(
     () =>
-      bookingEvents.map((event) => ({
+      mergedEvents.map((event) => ({
         ...event,
         startDate: new Date(event.start),
         endDate: new Date(event.end),
       })),
-    [bookingEvents],
+    [mergedEvents],
   );
 
   const fetchBookings = useCallback(async () => {
@@ -145,15 +310,18 @@ const Availability = () => {
 
   const buildSlotDate = (day: Date, minutesFromStart: number) => {
     const base = new Date(day);
-    base.setHours(dayStartHour, 0, 0, 0);
+    base.setHours(0, 0, 0, 0);
+    base.setMinutes(dayBounds.startMinutes);
     return addMinutes(base, minutesFromStart);
   };
 
   const getEventSlices = (day: Date, event: { startDate: Date; endDate: Date }) => {
     const dayStart = new Date(day);
-    dayStart.setHours(dayStartHour, 0, 0, 0);
+    dayStart.setHours(0, 0, 0, 0);
+    dayStart.setMinutes(dayBounds.startMinutes);
     const dayEnd = new Date(day);
-    dayEnd.setHours(dayEndHour, 0, 0, 0);
+    dayEnd.setHours(0, 0, 0, 0);
+    dayEnd.setMinutes(dayBounds.endMinutes);
 
     if (event.endDate <= dayStart || event.startDate >= dayEnd) {
       return null;
@@ -169,9 +337,27 @@ const Availability = () => {
       (event) => start < event.endDate && end > event.startDate,
     );
 
+  const isSlotWithinOpenHours = (day: Date, slotStartMinutes: number, slotEndMinutes: number) => {
+    const hours = getDayHours(day);
+    if (!hours) return false;
+    return slotStartMinutes >= hours.openMinutes && slotEndMinutes <= hours.closeMinutes;
+  };
+
   const handleSlotSelect = (day: Date, minutesFromStart: number) => {
     const start = buildSlotDate(day, minutesFromStart);
     const end = addMinutes(start, 60);
+    const slotStartMinutes = dayBounds.startMinutes + minutesFromStart;
+    const slotEndMinutes = slotStartMinutes + 60;
+
+    if (!isSlotWithinOpenHours(day, slotStartMinutes, slotEndMinutes)) {
+      toast({
+        title: "Venue closed",
+        description: "This time is outside the venue's opening hours.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const conflict = hasOverlap(start, end);
     if (conflict) {
       const statusLabel = conflict.status === "PAID" ? "Paid booking" : "Pending booking";
@@ -187,18 +373,138 @@ const Availability = () => {
 
   const bookingLabel = (event: BookingEvent, mode: "week" | "day") => {
     const statusLabel = event.status === "PAID" ? "Paid" : "Pending";
-    if (selectedCourt === "all" && mode === "week") {
-      return `${event.courtName} • ${statusLabel}`;
-    }
+    const nameLabel = event.eventName ? ` • ${event.eventName}` : "";
     if (selectedCourt === "all") {
-      return `${event.courtName} • ${statusLabel}`;
+      return `${event.courtName}${nameLabel} • ${statusLabel}`;
     }
-    return statusLabel;
+    return `${statusLabel}${nameLabel}`;
   };
 
   const formatWeekTitle = () => {
     const end = addDays(weekStart, 6);
     return `${format(weekStart, "MMM dd")} - ${format(end, "MMM dd")}`;
+  };
+
+  const handleCreateOverride = async () => {
+    if (!overrideForm.courtId || !overrideForm.sport || !overrideForm.eventName) {
+      toast({
+        title: "Missing fields",
+        description: "Please fill all required fields.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const startAt = toBangkokUtcIso(overrideForm.date, overrideForm.startTime);
+    const endAt = toBangkokUtcIso(overrideForm.date, overrideForm.endTime);
+
+    if (new Date(endAt) <= new Date(startAt)) {
+      toast({
+        title: "Invalid time range",
+        description: "End time must be after start time.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const selected = courts.find((court) => court.id === overrideForm.courtId);
+    if (!selected?.venue_id) {
+      toast({
+        title: "Missing court",
+        description: "Please select a valid court.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const durationMinutes = Math.round(
+      (new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000,
+    );
+    const bookingDate = new Date(`${overrideForm.date}T00:00:00`);
+    const isWeekend = bookingDate.getDay() === 0 || bookingDate.getDay() === 6;
+    const hourlyRate = Number(
+      isWeekend
+        ? selected.weekend_price_per_hour_thb ?? selected.peak_price
+        : selected.weekday_price_per_hour_thb ?? selected.off_peak_price,
+    );
+
+    if (!hourlyRate || Number.isNaN(hourlyRate)) {
+      toast({
+        title: "Court pricing missing",
+        description: "Please set court pricing before creating bookings.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const amount = ((hourlyRate * durationMinutes) / 60).toFixed(2);
+
+    const { data: conflicts, error: conflictError } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("court_id", overrideForm.courtId)
+      .in("status", ["pending", "confirmed", "paid", "held"])
+      .lt("start_at", endAt)
+      .gt("end_at", startAt)
+      .limit(1);
+
+    if (conflictError) {
+      toast({
+        title: "Failed to check availability",
+        description: conflictError.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (conflicts && conflicts.length > 0) {
+      toast({
+        title: "Time unavailable",
+        description: "This court already has a booking during that time.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const { error } = await supabase.from("bookings").insert({
+      venue_id: selected.venue_id,
+      booking_number: generateBookingNumber(),
+      date: overrideForm.date,
+      time: overrideForm.startTime,
+      start_at: startAt,
+      end_at: endAt,
+      court_id: overrideForm.courtId,
+      sport: overrideForm.sport,
+      player_name: overrideForm.eventName,
+      player_email: "no-email@playpal.local",
+      status: "paid",
+      payment_status: "Paid",
+      source: "Manual",
+      amount,
+      duration: durationMinutes,
+      notes: null,
+    });
+
+    if (error) {
+      toast({
+        title: "Failed to create booking",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    toast({ title: "Booking created" });
+    setOverrideDialogOpen(false);
+    setOverrideForm({
+      date: overrideForm.date,
+      startTime: overrideForm.startTime,
+      endTime: overrideForm.endTime,
+      courtId: overrideForm.courtId,
+      sport: "",
+      eventName: "",
+    });
+    fetchBookings();
   };
 
   return (
@@ -320,7 +626,7 @@ const Availability = () => {
                   <div className="border-r border-border bg-muted/30">
                     <div className="h-12 border-b border-border" />
                     {timeSlots.map((minutes) => {
-                      const minutesFromStart = minutes - dayStartHour * 60;
+                      const minutesFromStart = minutes - dayBounds.startMinutes;
                       const label = minutes % 60 === 0
                         ? formatTimeLabel(buildSlotDate(new Date(), minutesFromStart))
                         : "";
@@ -336,26 +642,44 @@ const Availability = () => {
                     })}
                   </div>
                   <div className={`grid ${visibleDays.length === 7 ? "grid-cols-7" : "grid-cols-1"}`}>
-                    {visibleDays.map((day) => (
+                    {visibleDays.map((day) => {
+                      const dayHours = getDayHours(day);
+                      const isClosedDay = !dayHours;
+                      return (
                       <div key={day.toISOString()} className="border-r border-border last:border-r-0">
-                        <div className="h-12 border-b border-border px-3 flex items-center justify-between">
+                      <div className="h-12 border-b border-border px-3 flex items-center justify-between">
+                        <div>
                           <div className="text-sm font-medium">{formatDayLabel(day)}</div>
-                          {loadingBookings && (
-                            <span className="text-xs text-muted-foreground">Loading...</span>
+                          {isClosedDay && (
+                            <div className="text-xs text-muted-foreground">Closed</div>
                           )}
                         </div>
+                        {(loadingBookings || isRecurringLoading) && (
+                          <span className="text-xs text-muted-foreground">Loading...</span>
+                        )}
+                      </div>
                         <div
                           className="relative"
                           style={{ height: timeSlots.length * slotHeight }}
                         >
-                          {timeSlots.map((minutes) => (
-                            <div
-                              key={minutes}
-                              className="availability-slot"
-                              style={{ height: slotHeight }}
-                              onClick={() => handleSlotSelect(day, minutes - dayStartHour * 60)}
-                            />
-                          ))}
+                          {timeSlots.map((minutes) => {
+                            const minutesFromStart = minutes - dayBounds.startMinutes;
+                            const slotStart = minutes;
+                            const slotEnd = minutes + slotMinutes;
+                            const isOpenSlot = isSlotWithinOpenHours(day, slotStart, slotEnd);
+                            return (
+                              <div
+                                key={minutes}
+                                className={`availability-slot${isOpenSlot ? "" : " availability-slot--closed"}`}
+                                style={{ height: slotHeight }}
+                                onClick={
+                                  isOpenSlot
+                                    ? () => handleSlotSelect(day, minutesFromStart)
+                                    : undefined
+                                }
+                              />
+                            );
+                          })}
                           {eventsWithDates.map((event) => {
                             const slice = getEventSlices(day, event);
                             if (!slice) return null;
@@ -385,7 +709,8 @@ const Availability = () => {
                           })}
                         </div>
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 </div>
               </CardContent>
@@ -464,7 +789,7 @@ const Availability = () => {
                 <div className="text-center py-8 text-muted-foreground">
                   <CalendarIcon className="h-12 w-12 mx-auto mb-3 opacity-50" />
                   <p>No special events or closures scheduled</p>
-                  <Button variant="cta" className="mt-4">
+                  <Button variant="cta" className="mt-4" onClick={() => setOverrideDialogOpen(true)}>
                     <Plus className="mr-2 h-4 w-4" />
                     Add override
                   </Button>
@@ -476,6 +801,97 @@ const Availability = () => {
       </div>
       
       <AddBookingDialog open={bookingDialogOpen} onOpenChange={setBookingDialogOpen} />
+      <Dialog open={overrideDialogOpen} onOpenChange={setOverrideDialogOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Add override booking</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Date</Label>
+                <Input
+                  type="date"
+                  value={overrideForm.date}
+                  onChange={(e) => setOverrideForm({ ...overrideForm, date: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Court</Label>
+                <Select
+                  value={overrideForm.courtId}
+                  onValueChange={(value) => setOverrideForm({ ...overrideForm, courtId: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select court" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {courts.map((court) => (
+                      <SelectItem key={court.id} value={court.id}>
+                        {court.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Start time</Label>
+                <Input
+                  type="time"
+                  value={overrideForm.startTime}
+                  onChange={(e) => setOverrideForm({ ...overrideForm, startTime: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>End time</Label>
+                <Input
+                  type="time"
+                  value={overrideForm.endTime}
+                  onChange={(e) => setOverrideForm({ ...overrideForm, endTime: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Sport</Label>
+                <Select
+                  value={overrideForm.sport}
+                  onValueChange={(value) => setOverrideForm({ ...overrideForm, sport: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select sport" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Tennis">Tennis</SelectItem>
+                    <SelectItem value="Padel">Padel</SelectItem>
+                    <SelectItem value="Badminton">Badminton</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Event name</Label>
+              <Input
+                value={overrideForm.eventName}
+                onChange={(e) => setOverrideForm({ ...overrideForm, eventName: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOverrideDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="cta" onClick={handleCreateOverride}>
+              Create booking
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };

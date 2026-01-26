@@ -7,12 +7,10 @@ import {
   Calendar,
   BookOpen,
   CreditCard,
-  Plug,
-  Users,
-  FileText,
   Settings,
   ChevronLeft,
   LogOut,
+  IdCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
@@ -28,9 +26,7 @@ const navigation = [
   { name: "Availability", href: "/availability", icon: Calendar },
   { name: "Bookings", href: "/bookings", icon: BookOpen },
   { name: "Payments", href: "/payments", icon: CreditCard },
-  { name: "Integrations", href: "/integrations", icon: Plug },
-  { name: "Team", href: "/team", icon: Users },
-  { name: "Reports", href: "/reports", icon: FileText },
+  { name: "Membership", href: "/membership", icon: IdCard },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

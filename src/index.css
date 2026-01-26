@@ -132,6 +132,10 @@ All colors MUST be HSL.
     @apply border-b border-border/70 cursor-pointer hover:bg-muted/40 transition-colors;
   }
 
+  .availability-slot--closed {
+    @apply bg-muted/30 cursor-not-allowed;
+  }
+
   .booking-event {
     @apply absolute left-2 right-2 rounded-md px-2 py-1 shadow-sm;
     color: #111827;

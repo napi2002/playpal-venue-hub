@@ -7,6 +7,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { useBookings } from "@/hooks/useBookings";
 import { useCourts } from "@/hooks/useCourts";
+import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { useRecurringBookings } from "@/hooks/useRecurringBookings";
 
 interface AddBookingDialogProps {
   open: boolean;
@@ -16,13 +19,14 @@ interface AddBookingDialogProps {
 export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) => {
   const { addBooking } = useBookings();
   const { courts } = useCourts();
+  const { recurringBookings } = useRecurringBookings();
+  const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     time: "09:00",
     courtId: "",
-    sport: "",
     player: "",
     email: "",
     duration: 60,
@@ -44,10 +48,49 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
     return utcDate.toISOString();
   };
 
+  const overlapsRecurring = (courtId: string, startAt: string, endAt: string) => {
+    const bookingDateKey = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(startAt));
+    const weekdayLabel = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Bangkok",
+      weekday: "short",
+    }).format(new Date(startAt));
+    const weekdayIndex = new Map([
+      ["Sun", 0],
+      ["Mon", 1],
+      ["Tue", 2],
+      ["Wed", 3],
+      ["Thu", 4],
+      ["Fri", 5],
+      ["Sat", 6],
+    ]);
+    const bookingWeekday = weekdayIndex.get(weekdayLabel);
+    if (bookingWeekday === undefined) return false;
+
+    return recurringBookings.some((recurring) => {
+      if (recurring.status === "cancelled") return false;
+      if (recurring.court_id !== courtId) return false;
+      if (recurring.day_of_week !== bookingWeekday) return false;
+      if (bookingDateKey < recurring.start_date) return false;
+      if (recurring.end_date && bookingDateKey > recurring.end_date) return false;
+
+      const recurringStart = toBangkokUtcIso(bookingDateKey, recurring.time);
+      const recurringEnd = new Date(
+        new Date(recurringStart).getTime() + Number(recurring.duration) * 60000,
+      ).toISOString();
+
+      return new Date(startAt) < new Date(recurringEnd) && new Date(endAt) > new Date(recurringStart);
+    });
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     
-    if (!formData.courtId || !formData.sport || !formData.player || !formData.email) {
+    if (!formData.courtId || !formData.player || !formData.email) {
       return;
     }
 
@@ -63,13 +106,54 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
         throw new Error("Selected court is missing venue access");
       }
 
-      // Calculate amount based on sport and duration
-      const pricePerHour = formData.sport === "Tennis" ? 45 : formData.sport === "Padel" ? 40 : 35;
-      const amount = ((pricePerHour * formData.duration) / 60).toFixed(2);
+      const bookingDate = new Date(`${formData.date}T00:00:00`);
+      const isWeekend = bookingDate.getDay() === 0 || bookingDate.getDay() === 6;
+      const hourlyRate = Number(
+        isWeekend
+          ? selectedCourt.weekend_price_per_hour_thb ?? selectedCourt.peak_price
+          : selectedCourt.weekday_price_per_hour_thb ?? selectedCourt.off_peak_price,
+      );
+
+      if (!hourlyRate || Number.isNaN(hourlyRate)) {
+        throw new Error("Court pricing is not configured");
+      }
+
+      const amount = ((hourlyRate * formData.duration) / 60).toFixed(2);
 
       const bookingNumber = generateBookingNumber();
       const startAt = toBangkokUtcIso(formData.date, formData.time);
       const endAt = new Date(new Date(startAt).getTime() + formData.duration * 60000).toISOString();
+
+      if (overlapsRecurring(formData.courtId, startAt, endAt)) {
+        toast({
+          title: "Time unavailable",
+          description: "This court has a recurring booking during that time.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const { data: conflicts, error: conflictError } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("court_id", formData.courtId)
+        .in("status", ["pending", "confirmed", "paid", "held"])
+        .lt("start_at", endAt)
+        .gt("end_at", startAt)
+        .limit(1);
+
+      if (conflictError) {
+        throw conflictError;
+      }
+
+      if (conflicts && conflicts.length > 0) {
+        toast({
+          title: "Time unavailable",
+          description: "This court already has a booking during that time.",
+          variant: "destructive",
+        });
+        return;
+      }
 
       await addBooking({
         venue_id: selectedCourt.venue_id,
@@ -79,7 +163,7 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
         start_at: startAt,
         end_at: endAt,
         court_id: formData.courtId,
-        sport: formData.sport,
+        sport: selectedCourt.sport,
         player_name: formData.player,
         player_email: formData.email,
         status: formData.paymentStatus === "Paid" ? "paid" : "pending",
@@ -95,7 +179,6 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
         date: new Date().toISOString().split('T')[0],
         time: "09:00",
         courtId: "",
-        sport: "",
         player: "",
         email: "",
         duration: 60,
@@ -154,19 +237,6 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
                         {court.name} - {court.sport}
                       </SelectItem>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="sport">Sport *</Label>
-                <Select value={formData.sport} onValueChange={(value) => setFormData({ ...formData, sport: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select sport" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Tennis">Tennis</SelectItem>
-                    <SelectItem value="Padel">Padel</SelectItem>
-                    <SelectItem value="Squash">Squash</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

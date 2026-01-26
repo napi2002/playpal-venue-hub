@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,80 +19,216 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Search,
-  Filter,
-  Download,
-  MoreVertical,
-  Eye,
-  RotateCcw,
-  DollarSign,
-  TrendingUp,
-  CreditCard,
-  Clock,
-} from "lucide-react";
-import { usePayments } from "@/hooks/usePayments";
-import { format } from "date-fns";
+import { Download, Filter, Search } from "lucide-react";
+import { apiFetch } from "@/lib/apiClient";
+import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+
+const PAGE_SIZE = 10;
+
+type PaymentStatus = "PENDING" | "COMPLETED" | "REFUNDED" | "FAILED";
+
+type PaymentRecord = {
+  id: string;
+  booking_id: string;
+  player_name: string;
+  amount: number | string;
+  currency?: string | null;
+  status: PaymentStatus;
+  method?: string | null;
+  transaction_id?: string | null;
+  created_at: string;
+};
+
+type PaymentsResponse = {
+  data: PaymentRecord[];
+  total: number;
+};
+
+type SummaryResponse = {
+  completedAmount: number;
+  completedCount: number;
+  pendingAmount: number;
+  pendingCount: number;
+  refundedAmount: number;
+  refundedCount: number;
+  totalCount: number;
+};
+
+type PendingBooking = {
+  id: string;
+  booking_number: string | null;
+  player_name: string | null;
+  court_name: string | null;
+  date: string | null;
+  time: string | null;
+  amount: number | string;
+  status: string | null;
+  created_at: string;
+};
+
+type PendingBookingsResponse = {
+  data: PendingBooking[];
+  total: number;
+};
 
 const Payments = () => {
-  const [statusFilter, setStatusFilter] = useState("all");
+  const { toast } = useToast();
+  const [statusFilter, setStatusFilter] = useState<"all" | PaymentStatus>("all");
+  const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const { payments, isLoading, refundPayment } = usePayments();
+  const [page, setPage] = useState(1);
+  const [pendingPage, setPendingPage] = useState(1);
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [totalPayments, setTotalPayments] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pendingBookings, setPendingBookings] = useState<PendingBooking[]>([]);
+  const [pendingTotal, setPendingTotal] = useState(0);
+  const [pendingLoading, setPendingLoading] = useState(true);
+  const [pendingError, setPendingError] = useState<string | null>(null);
 
-  const getStatusColor = (status: string) => {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchQuery(searchInput.trim());
+      setPage(1);
+      setPendingPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  const queryParams = useMemo(() => {
+    const params = new URLSearchParams();
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (searchQuery) params.set("q", searchQuery);
+    params.set("page", String(page));
+    params.set("pageSize", String(PAGE_SIZE));
+    return params;
+  }, [page, searchQuery, statusFilter]);
+
+  const pendingQueryParams = useMemo(() => {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set("q", searchQuery);
+    params.set("page", String(pendingPage));
+    params.set("pageSize", String(PAGE_SIZE));
+    return params;
+  }, [pendingPage, searchQuery]);
+
+  const fetchSummary = async () => {
+    try {
+      const data = await apiFetch(`/payments/summary?${queryParams.toString()}`);
+      setSummary(data as SummaryResponse);
+    } catch (error) {
+      toast({
+        title: "Failed to load summary",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const fetchPayments = async () => {
+    try {
+      setIsLoading(true);
+      setErrorMessage(null);
+      const response = (await apiFetch(`/payments?${queryParams.toString()}`)) as
+        | PaymentsResponse
+        | { data: PaymentRecord[]; total: number }
+        | { items: PaymentRecord[]; total: number };
+
+      const data = "items" in response ? response.items : response.data;
+      setPayments(data || []);
+      setTotalPayments(response.total ?? data.length);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to load payments");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchPendingBookings = async () => {
+    try {
+      setPendingLoading(true);
+      setPendingError(null);
+      const response = (await apiFetch(
+        `/payments/pending?${pendingQueryParams.toString()}`,
+      )) as PendingBookingsResponse;
+      setPendingBookings(response.data ?? []);
+      setPendingTotal(response.total ?? 0);
+    } catch (error) {
+      setPendingError(
+        error instanceof Error ? error.message : "Failed to load pending bookings",
+      );
+    } finally {
+      setPendingLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSummary();
+    fetchPayments();
+  }, [queryParams.toString()]);
+
+  useEffect(() => {
+    fetchPendingBookings();
+  }, [pendingQueryParams.toString()]);
+
+  const totalPages = Math.max(1, Math.ceil(totalPayments / PAGE_SIZE));
+  const pendingTotalPages = Math.max(1, Math.ceil(pendingTotal / PAGE_SIZE));
+
+  const statusBadge = (status: PaymentStatus) => {
     switch (status) {
-      case "completed":
-      case "paid":
+      case "COMPLETED":
         return "bg-green-500/10 text-green-700 border-green-200";
-      case "pending":
+      case "PENDING":
         return "bg-amber-500/10 text-amber-700 border-amber-200";
-      case "refunded":
+      case "REFUNDED":
         return "bg-purple-500/10 text-purple-700 border-purple-200";
-      case "failed":
+      case "FAILED":
         return "bg-red-500/10 text-red-700 border-red-200";
       default:
         return "bg-muted text-muted-foreground";
     }
   };
 
-  const filteredPayments = payments.filter((payment) => {
-    const matchesStatus = statusFilter === "all" || payment.status === statusFilter;
-    const matchesSearch =
-      searchQuery === "" ||
-      payment.bookings?.player_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      payment.bookings?.booking_number?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      payment.transaction_id?.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesStatus && matchesSearch;
-  });
+  const handleExport = async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || "http://localhost:3001"}/payments/export?${queryParams.toString()}`,
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        },
+      );
 
-  const totalRevenue = payments
-    .filter((p) => p.status === "completed" || p.status === "paid")
-    .reduce((sum, p) => sum + Number(p.amount), 0);
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
 
-  const pendingAmount = payments
-    .filter((p) => p.status === "pending")
-    .reduce((sum, p) => sum + Number(p.amount), 0);
-
-  const refundedAmount = payments
-    .filter((p) => p.status === "refunded")
-    .reduce((sum, p) => sum + Number(p.refund_amount || 0), 0);
-
-  const handleRefund = (paymentId: string, amount: number) => {
-    if (confirm("Are you sure you want to refund this payment?")) {
-      refundPayment({ id: paymentId, amount });
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const today = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `payments_${today}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
     }
   };
+
+  const renderSummaryValue = (value?: number) => (value ?? 0).toFixed(2);
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Payments & Payouts</h1>
@@ -100,68 +236,63 @@ const Payments = () => {
               Track transactions and manage payouts
             </p>
           </div>
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
         </div>
 
-        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Total Revenue
               </CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">${totalRevenue.toFixed(2)}</div>
+              <div className="text-2xl font-bold">
+                ฿{renderSummaryValue(summary?.completedAmount)}
+              </div>
               <p className="text-xs text-muted-foreground mt-1">
-                From {payments.filter((p) => p.status === "completed" || p.status === "paid").length} payments
+                {summary?.completedCount ?? 0} payments completed
               </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Pending
-              </CardTitle>
-              <Clock className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">Pending</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-amber-600">${pendingAmount.toFixed(2)}</div>
+              <div className="text-2xl font-bold text-amber-600">
+                ฿{renderSummaryValue(summary?.pendingAmount)}
+              </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {payments.filter((p) => p.status === "pending").length} awaiting
+                {summary?.pendingCount ?? 0} awaiting
               </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Refunded
-              </CardTitle>
-              <RotateCcw className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">Refunded</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-purple-600">${refundedAmount.toFixed(2)}</div>
+              <div className="text-2xl font-bold text-purple-600">
+                ฿{renderSummaryValue(summary?.refundedAmount)}
+              </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {payments.filter((p) => p.status === "refunded").length} refunds
+                {summary?.refundedCount ?? 0} refunds
               </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Transactions
-              </CardTitle>
-              <CreditCard className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">Transactions</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{payments.length}</div>
+              <div className="text-2xl font-bold">{summary?.totalCount ?? 0}</div>
               <p className="text-xs text-muted-foreground mt-1">
                 Total transactions
               </p>
@@ -169,7 +300,6 @@ const Payments = () => {
           </Card>
         </div>
 
-        {/* Filters */}
         <Card className="shadow-sm">
           <CardContent className="pt-6">
             <div className="flex flex-col md:flex-row gap-4">
@@ -178,138 +308,217 @@ const Payments = () => {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder="Search by booking ID, player name, or transaction ID..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
                     className="pl-10"
                   />
                 </div>
               </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as "all" | PaymentStatus)}>
                 <SelectTrigger className="w-[180px]">
                   <Filter className="mr-2 h-4 w-4" />
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                  <SelectItem value="paid">Paid</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="refunded">Refunded</SelectItem>
-                  <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="PENDING">Pending</SelectItem>
+                  <SelectItem value="COMPLETED">Completed</SelectItem>
+                  <SelectItem value="REFUNDED">Refunded</SelectItem>
+                  <SelectItem value="FAILED">Failed</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </CardContent>
         </Card>
 
-        {/* Payments Table */}
         <Card className="shadow-sm">
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50">
-                    <TableHead>Transaction</TableHead>
-                    <TableHead>Booking</TableHead>
-                    <TableHead>Player</TableHead>
+                    <TableHead>Transaction ID</TableHead>
+                    <TableHead>Booking ID</TableHead>
+                    <TableHead>Player Name</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Method</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
+                    Array.from({ length: PAGE_SIZE }).map((_, index) => (
+                      <TableRow key={`skeleton-${index}`} className="animate-pulse">
+                        <TableCell colSpan={7}>
+                          <div className="h-4 w-full rounded bg-muted" />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : errorMessage ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8">
-                        Loading payments...
+                      <TableCell colSpan={7} className="text-center py-8 text-destructive">
+                        {errorMessage}
                       </TableCell>
                     </TableRow>
-                  ) : filteredPayments.length === 0 ? (
+                  ) : payments.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                         No payments found
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredPayments.map((payment) => (
+                    payments.map((payment) => (
                       <TableRow key={payment.id} className="hover:bg-muted/30">
                         <TableCell className="font-mono text-sm">
-                          {payment.transaction_id || "-"}
+                          {payment.transaction_id || payment.id}
                         </TableCell>
+                        <TableCell>{payment.booking_id}</TableCell>
+                        <TableCell>{payment.player_name}</TableCell>
                         <TableCell>
-                          <span className="font-medium">
-                            {payment.bookings?.booking_number || "-"}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <div className="font-medium">
-                              {payment.bookings?.player_name || "-"}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {payment.bookings?.player_email || ""}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          {payment.paid_at
-                            ? format(new Date(payment.paid_at), "MMM dd, yyyy HH:mm")
-                            : format(new Date(payment.created_at), "MMM dd, yyyy HH:mm")}
+                          {new Date(payment.created_at).toLocaleString("en-GB", {
+                            hour12: false,
+                          })}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-xs">
-                            {payment.payment_method || "N/A"}
+                            {payment.method || "N/A"}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={getStatusColor(payment.status || "")}
-                          >
+                          <Badge variant="outline" className={statusBadge(payment.status)}>
                             {payment.status}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          {payment.currency} {Number(payment.amount).toFixed(2)}
-                          {payment.refund_amount && (
-                            <div className="text-xs text-purple-600">
-                              Refund: {payment.currency} {Number(payment.refund_amount).toFixed(2)}
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem>
-                                <Eye className="mr-2 h-4 w-4" />
-                                View details
-                              </DropdownMenuItem>
-                              {(payment.status === "completed" || payment.status === "paid") &&
-                                !payment.refund_amount && (
-                                  <DropdownMenuItem
-                                    onClick={() =>
-                                      handleRefund(payment.id, Number(payment.amount))
-                                    }
-                                  >
-                                    <RotateCcw className="mr-2 h-4 w-4" />
-                                    Refund
-                                  </DropdownMenuItem>
-                                )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          ฿{Number(payment.amount).toFixed(2)}
                         </TableCell>
                       </TableRow>
                     ))
                   )}
                 </TableBody>
               </Table>
+            </div>
+            <div className="flex items-center justify-between px-4 py-3">
+              <div className="text-sm text-muted-foreground">
+                Page {page} of {totalPages}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                  disabled={page === 1 || isLoading}
+                >
+                  Prev
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                  disabled={page >= totalPages || isLoading}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardContent className="pt-6 pb-4">
+            <div>
+              <h2 className="text-lg font-semibold">Pending bookings</h2>
+              <p className="text-sm text-muted-foreground">
+                Bookings awaiting payment confirmation
+              </p>
+            </div>
+          </CardContent>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead>Booking ID</TableHead>
+                    <TableHead>Event Name</TableHead>
+                    <TableHead>Court</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pendingLoading ? (
+                    Array.from({ length: PAGE_SIZE }).map((_, index) => (
+                      <TableRow key={`pending-skeleton-${index}`} className="animate-pulse">
+                        <TableCell colSpan={6}>
+                          <div className="h-4 w-full rounded bg-muted" />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : pendingError ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-8 text-destructive">
+                        {pendingError}
+                      </TableCell>
+                    </TableRow>
+                  ) : pendingBookings.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                        No pending bookings
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    pendingBookings.map((booking) => (
+                      <TableRow key={booking.id} className="hover:bg-muted/30">
+                        <TableCell>{booking.booking_number ?? booking.id}</TableCell>
+                        <TableCell>{booking.player_name ?? "-"}</TableCell>
+                        <TableCell>{booking.court_name ?? "-"}</TableCell>
+                        <TableCell>
+                          {booking.date && booking.time
+                            ? `${booking.date} ${booking.time}`
+                            : booking.created_at
+                              ? new Date(booking.created_at).toLocaleString("en-GB", {
+                                  hour12: false,
+                                })
+                              : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={statusBadge("PENDING")}>
+                            PENDING
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          ฿{Number(booking.amount).toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="flex items-center justify-between px-4 py-3">
+              <div className="text-sm text-muted-foreground">
+                Page {pendingPage} of {pendingTotalPages}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPendingPage((prev) => Math.max(1, prev - 1))}
+                  disabled={pendingPage === 1 || pendingLoading}
+                >
+                  Prev
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPendingPage((prev) => Math.min(pendingTotalPages, prev + 1))}
+                  disabled={pendingPage >= pendingTotalPages || pendingLoading}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

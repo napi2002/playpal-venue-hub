@@ -6,5 +6,6 @@ export type BookingEvent = {
   courtName: string;
   start: string;
   end: string;
+  eventName?: string | null;
   status: BookingStatus;
 };
