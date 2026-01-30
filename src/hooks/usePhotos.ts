@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuthSession } from "@/contexts/AuthContext";
+import { apiFetch } from "@/lib/apiClient";
+import { useVenue } from "@/hooks/useVenue";
 
 type Photo = {
   id: string;
@@ -13,13 +14,13 @@ type Photo = {
 
 export const usePhotos = () => {
   const { session } = useAuthSession();
+  const { venue } = useVenue();
   const { data: photos = [], isLoading } = useQuery({
-    queryKey: ["photos", session?.user?.id],
-    enabled: !!session?.user?.id,
+    queryKey: ["photos", session?.user?.id, venue?.id],
+    enabled: !!session?.user?.id && !!venue?.id,
     queryFn: async () => {
-      const { data, error } = await supabase.from("photos").select("*");
-      if (error) throw error;
-      return (data ?? []) as Photo[];
+      const data = await apiFetch(`/api/venues/${venue?.id}/photos`);
+      return Array.isArray(data) ? (data as Photo[]) : [];
     },
   });
 

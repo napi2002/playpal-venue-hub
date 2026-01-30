@@ -60,6 +60,9 @@ type PlayerBooking = {
   time: string | null;
   start_at: string | null;
   end_at: string | null;
+  slot_start?: string | null;
+  slot_end?: string | null;
+  total_price?: number | null;
   amount: string | null;
   status: string;
   membership_type: string | null;
@@ -387,7 +390,7 @@ const PlayerProfile = () => {
                           <Badge variant="outline">{booking.status}</Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          ฿{Number(booking.final_price ?? booking.amount ?? 0).toFixed(2)}
+                          ฿{Number(booking.final_price ?? booking.total_price ?? booking.amount ?? 0).toFixed(2)}
                         </TableCell>
                       </TableRow>
                     ))

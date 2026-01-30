@@ -36,10 +36,8 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
     day_of_week: "",
     time: "",
     duration: "60",
-    sport: "",
     player_name: "",
     player_email: "",
-    amount: "",
     start_date: new Date(),
     end_date: undefined as Date | undefined,
   });
@@ -57,17 +55,15 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
 
     const recurringBooking: TablesInsert<"recurring_bookings"> = {
       venue_id,
-      court_id: formData.court_id,
+      court_id: Number(formData.court_id),
       day_of_week: parseInt(formData.day_of_week),
       time: formData.time,
       duration: parseInt(formData.duration),
-      sport: formData.sport,
       player_name: formData.player_name,
       player_email: formData.player_email,
-      amount: formData.amount,
       start_date: format(formData.start_date, "yyyy-MM-dd"),
       end_date: formData.end_date ? format(formData.end_date, "yyyy-MM-dd") : null,
-      status: "confirmed",
+      status: "active",
     };
 
     addRecurringBooking(recurringBooking);
@@ -77,10 +73,8 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
       day_of_week: "",
       time: "",
       duration: "60",
-      sport: "",
       player_name: "",
       player_email: "",
-      amount: "",
       start_date: new Date(),
       end_date: undefined,
     });
@@ -105,7 +99,7 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
                 </SelectTrigger>
                 <SelectContent>
                   {courts.map((court) => (
-                    <SelectItem key={court.id} value={court.id}>
+                    <SelectItem key={court.id} value={String(court.id)}>
                       {court.name}
                     </SelectItem>
                   ))}
@@ -148,32 +142,6 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
                 value={formData.duration}
                 onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
                 required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="sport">Sport</Label>
-              <Select value={formData.sport} onValueChange={(value) => setFormData({ ...formData, sport: value })}>
-                <SelectTrigger id="sport">
-                  <SelectValue placeholder="Select sport" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Tennis">Tennis</SelectItem>
-                  <SelectItem value="Badminton">Badminton</SelectItem>
-                  <SelectItem value="Pickleball">Pickleball</SelectItem>
-                  <SelectItem value="Squash">Squash</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="amount">Amount (THB)</Label>
-              <Input
-                id="amount"
-                value={formData.amount}
-                onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                required
-                placeholder="0.00"
               />
             </div>
 

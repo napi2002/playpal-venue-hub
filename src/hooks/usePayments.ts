@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useAuthSession } from "@/contexts/AuthContext";
+import { apiFetch } from "@/lib/apiClient";
 
 export interface Payment {
   id: string;
@@ -11,12 +11,8 @@ export interface Payment {
   currency: string;
   status: string;
   payment_method: string | null;
-  payment_provider: string | null;
   transaction_id: string | null;
-  paid_at: string | null;
-  refund_amount: number | null;
-  refunded_at: string | null;
-  metadata: unknown;
+  transaction_date: string | null;
   created_at: string;
   updated_at: string;
   bookings?: {
@@ -38,32 +34,19 @@ export const usePayments = () => {
     queryKey: ["payments", session?.user?.id],
     enabled: !!session?.user?.id,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("payments")
-        .select(`
-          *,
-          bookings (
-            booking_number,
-            player_name,
-            player_email,
-            date,
-            time
-          )
-        `)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      return data as Payment[];
+      const response = (await apiFetch("/payments?page=1&pageSize=200")) as {
+        data?: Payment[];
+      };
+      return response.data ?? [];
     },
   });
 
   const updatePayment = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<Payment> }) => {
-      const { error } = await supabase
-        .from("payments")
-        .update(updates)
-        .eq("id", id);
-      if (error) throw error;
+      await apiFetch(`/payments/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(updates),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["payments"] });
@@ -75,16 +58,13 @@ export const usePayments = () => {
   });
 
   const refundPayment = useMutation({
-    mutationFn: async ({ id, amount }: { id: string; amount: number }) => {
-      const { error } = await supabase
-        .from("payments")
-        .update({
+    mutationFn: async ({ id }: { id: string }) => {
+      await apiFetch(`/payments/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({
           status: "refunded",
-          refund_amount: amount,
-          refunded_at: new Date().toISOString(),
-        })
-        .eq("id", id);
-      if (error) throw error;
+        }),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["payments"] });

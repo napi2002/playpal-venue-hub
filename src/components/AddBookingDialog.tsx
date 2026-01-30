@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useBookings } from "@/hooks/useBookings";
 import { useCourts } from "@/hooks/useCourts";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch } from "@/lib/apiClient";
 import { useRecurringBookings } from "@/hooks/useRecurringBookings";
 
 interface AddBookingDialogProps {
@@ -98,7 +98,7 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
 
     try {
       // Get venue_id from the selected court
-      const selectedCourt = courts.find(c => c.id === formData.courtId);
+      const selectedCourt = courts.find((court) => String(court.id) === formData.courtId);
       if (!selectedCourt) {
         throw new Error("Selected court not found");
       }
@@ -118,7 +118,7 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
         throw new Error("Court pricing is not configured");
       }
 
-      const amount = ((hourlyRate * formData.duration) / 60).toFixed(2);
+      const amount = Number(((hourlyRate * formData.duration) / 60).toFixed(2));
 
       const bookingNumber = generateBookingNumber();
       const startAt = toBangkokUtcIso(formData.date, formData.time);
@@ -133,20 +133,13 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
         return;
       }
 
-      const { data: conflicts, error: conflictError } = await supabase
-        .from("bookings")
-        .select("id")
-        .eq("court_id", formData.courtId)
-        .in("status", ["pending", "confirmed", "paid", "held"])
-        .lt("start_at", endAt)
-        .gt("end_at", startAt)
-        .limit(1);
+      const conflicts = (await apiFetch(
+        `/api/venues/${selectedCourt.venue_id}/bookings?start=${encodeURIComponent(
+          startAt,
+        )}&end=${encodeURIComponent(endAt)}&courtId=${formData.courtId}`,
+      )) as Array<{ id: string }>;
 
-      if (conflictError) {
-        throw conflictError;
-      }
-
-      if (conflicts && conflicts.length > 0) {
+      if (Array.isArray(conflicts) && conflicts.length > 0) {
         toast({
           title: "Time unavailable",
           description: "This court already has a booking during that time.",
@@ -158,19 +151,17 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
       await addBooking({
         venue_id: selectedCourt.venue_id,
         booking_number: bookingNumber,
-        date: formData.date,
-        time: formData.time,
-        start_at: startAt,
-        end_at: endAt,
-        court_id: formData.courtId,
-        sport: selectedCourt.sport,
+        slot_start: startAt,
+        slot_end: endAt,
+        court_id: Number(formData.courtId),
         player_name: formData.player,
         player_email: formData.email,
         status: formData.paymentStatus === "Paid" ? "paid" : "pending",
         payment_status: formData.paymentStatus,
         source: "Manual",
-        amount: amount,
-        duration: formData.duration,
+        total_price: amount,
+        currency: "THB",
+        duration_minutes: formData.duration,
         notes: formData.notes || null,
       });
 
@@ -233,8 +224,8 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
                   </SelectTrigger>
                   <SelectContent>
                     {courts.map((court) => (
-                      <SelectItem key={court.id} value={court.id}>
-                        {court.name} - {court.sport}
+                      <SelectItem key={court.id} value={String(court.id)}>
+                        {court.name} - {court.sport ?? court.sport_type ?? "Sport"}
                       </SelectItem>
                     ))}
                   </SelectContent>

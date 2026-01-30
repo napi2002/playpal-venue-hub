@@ -12,9 +12,6 @@ import Bookings from "./pages/Bookings";
 import Payments from "./pages/Payments";
 import Membership from "./pages/Membership";
 import PlayerProfile from "./pages/PlayerProfile";
-import Integrations from "./pages/Integrations";
-import Team from "./pages/Team";
-import Reports from "./pages/Reports";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
 import VenueOnboarding from "./pages/VenueOnboarding";
@@ -41,9 +38,6 @@ const App = () => (
             <Route path="/payments" element={<ProtectedRoute><Payments /></ProtectedRoute>} />
             <Route path="/membership" element={<ProtectedRoute><Membership /></ProtectedRoute>} />
             <Route path="/membership/:playerId" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />
-            <Route path="/integrations" element={<ProtectedRoute><Integrations /></ProtectedRoute>} />
-            <Route path="/team" element={<ProtectedRoute><Team /></ProtectedRoute>} />
-            <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>

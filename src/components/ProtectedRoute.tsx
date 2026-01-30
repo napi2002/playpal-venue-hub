@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuthSession } from "@/contexts/AuthContext";
+import { apiFetch } from "@/lib/apiClient";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -28,21 +28,17 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
       setCheckingVenue(true);
       try {
         const pendingSubmit = localStorage.getItem("playpal-onboarding-submitted") === "true";
-        const { data, error } = await supabase
-          .from("venues")
-          .select("id,status")
-          .order("created_at", { ascending: true })
-          .limit(1)
-          .maybeSingle();
+        const data = await apiFetch("/api/venue");
 
         if (!isMounted) return;
-        if (error || !data) {
+        if (!data || data.error) {
           setHasVenue(false);
           setRequiresOnboarding(!pendingSubmit);
         } else {
+          const venueStatus = data.status ?? data?.venue?.status;
           setHasVenue(true);
-          setRequiresOnboarding(data.status !== "SUBMITTED");
-          if (data.status === "SUBMITTED") {
+          setRequiresOnboarding(venueStatus !== "SUBMITTED");
+          if (venueStatus === "SUBMITTED") {
             localStorage.removeItem("playpal-onboarding-submitted");
           }
         }

@@ -1,23 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { Tables } from "@/integrations/supabase/types";
 import { useAuthSession } from "@/contexts/AuthContext";
-
-type Court = Tables<"courts">;
+import { apiFetch } from "@/lib/apiClient";
+import { useVenue } from "@/hooks/useVenue";
 
 export const useCourts = () => {
   const { session } = useAuthSession();
+  const { venue } = useVenue();
   const { data: courts = [], isLoading } = useQuery({
-    queryKey: ["courts", session?.user?.id],
-    enabled: !!session?.user?.id,
+    queryKey: ["courts", session?.user?.id, venue?.id],
+    enabled: !!session?.user?.id && !!venue?.id,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("courts")
-        .select("*")
-        .order("name");
-
-      if (error) throw error;
-      return data as Court[];
+      const data = await apiFetch(`/api/venues/${venue?.id}/courts`);
+      return Array.isArray(data) ? data : [];
     },
   });
 

@@ -49,20 +49,42 @@ const getUser = async (req: Request) => {
   return data.user;
 };
 
-const ensureVenueAccess = async (client: ReturnType<typeof pool.connect>, userId: string, venueId: string) => {
+const ensureAdminUser = async (client: ReturnType<typeof pool.connect>, authUser: { id: string; email?: string | null }) => {
+  const { rows } = await client.queryObject<{ id: number }>(
+    "select id from public.users where auth_id = $1 limit 1",
+    [authUser.id],
+  );
+  if (rows[0]?.id) return rows[0].id;
+
+  const { rows: created } = await client.queryObject<{ id: number }>(
+    `
+      insert into public.users (email, role, auth_id)
+      values ($1, 'admin', $2)
+      returning id
+    `,
+    [authUser.email ?? `user-${authUser.id}@local`, authUser.id],
+  );
+  return created[0]?.id;
+};
+
+const ensureVenueAccess = async (
+  client: ReturnType<typeof pool.connect>,
+  ownerId: number,
+  venueId: number,
+) => {
   const { rows } = await client.queryObject(
-    "select 1 from public.user_roles where user_id = $1 and venue_id = $2 limit 1",
-    [userId, venueId],
+    "select 1 from public.venues where id = $1 and owner_id = $2 limit 1",
+    [venueId, ownerId],
   );
   return rows.length > 0;
 };
 
-const getPrimaryVenueId = async (client: ReturnType<typeof pool.connect>, userId: string) => {
-  const { rows } = await client.queryObject<{ venue_id: string }>(
-    "select venue_id from public.user_roles where user_id = $1 order by created_at asc limit 1",
-    [userId],
+const getPrimaryVenueId = async (client: ReturnType<typeof pool.connect>, ownerId: number) => {
+  const { rows } = await client.queryObject<{ id: number }>(
+    "select id from public.venues where owner_id = $1 order by created_at asc limit 1",
+    [ownerId],
   );
-  return rows[0]?.venue_id ?? null;
+  return rows[0]?.id ?? null;
 };
 
 const parseJsonBody = async (req: Request) => {
@@ -70,6 +92,12 @@ const parseJsonBody = async (req: Request) => {
     return await req.json();
   }
   return {};
+};
+
+const parseId = (value: string | undefined) => {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
 serve(async (req) => {
@@ -86,6 +114,8 @@ serve(async (req) => {
 
   const client = await pool.connect();
   try {
+    const adminUserId = await ensureAdminUser(client, { id: user.id, email: user.email ?? null });
+
     if (req.method === "POST" && pathname === "/api/upload") {
       const form = await req.formData();
       const file = form.get("file");
@@ -120,22 +150,19 @@ serve(async (req) => {
       const body = await parseJsonBody(req);
       const profile = body.profile ?? {};
 
-      const { rows: existing } = await client.queryObject<{ venue_id: string }>(
-        "select venue_id from public.user_roles where user_id = $1 order by created_at asc limit 1",
-        [user.id],
+      const { rows: existing } = await client.queryObject<{ id: number }>(
+        "select id from public.venues where owner_id = $1 order by created_at asc limit 1",
+        [adminUserId],
       );
       if (existing.length) {
-        return jsonResponse({ venueId: existing[0].venue_id });
+        return jsonResponse({ venueId: existing[0].id });
       }
 
       await client.queryObject("begin");
       try {
-        const { rows } = await client.queryObject<{ id: string }>(
-          `with new_venue as (
-            select gen_random_uuid() as id
-          )
+        const { rows } = await client.queryObject<{ id: number }>(
+          `
           insert into public.venues (
-            id,
             name,
             name_en,
             name_th,
@@ -151,28 +178,13 @@ serve(async (req) => {
             email,
             phone,
             status,
-            slug
+            owner_id
           )
-          select
-            id,
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            $6,
-            $7,
-            $8,
-            $9,
-            $10,
-            $11,
-            $12,
-            $13,
-            $14,
-            'DRAFT',
-            $15
-          from new_venue
-          returning id`,
+          values (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'DRAFT', $15
+          )
+          returning id
+          `,
           [
             profile.venueNameEn ?? "New Venue",
             profile.venueNameEn ?? null,
@@ -188,7 +200,7 @@ serve(async (req) => {
             profile.defaultSlotDurationMins ?? null,
             profile.email ?? null,
             profile.phone ?? null,
-            `${user.id}-venue`,
+            adminUserId,
           ],
         );
 
@@ -197,11 +209,6 @@ serve(async (req) => {
           throw new Error("Failed to create venue");
         }
 
-        await client.queryObject(
-          `insert into public.user_roles (user_id, venue_id, role)
-          values ($1, $2, 'owner')`,
-          [user.id, venueId],
-        );
         await client.queryObject("commit");
         return jsonResponse({ venueId });
       } catch (error) {
@@ -211,12 +218,12 @@ serve(async (req) => {
     }
 
     if (req.method === "PUT" && pathname.startsWith("/api/venues/")) {
-      const venueId = pathname.split("/")[3];
+      const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, user.id, venueId);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
       const body = await parseJsonBody(req);
-      const profile = body.profile ?? {};
+      const profile = body.profile ?? body ?? {};
 
       await client.queryObject(
         `
@@ -236,24 +243,26 @@ serve(async (req) => {
             default_slot_duration_mins = $12,
             email = $13,
             phone = $14,
+            sports_supported = $15,
             updated_at = now()
-          where id = $15
+          where id = $16
         `,
         [
-          profile.venueNameEn ?? "New Venue",
-          profile.venueNameEn ?? null,
-          profile.venueNameTh ?? null,
-          profile.venueType ?? null,
-          profile.addressLine1 ?? null,
+          profile.venueNameEn ?? profile.name_en ?? profile.name ?? "New Venue",
+          profile.venueNameEn ?? profile.name_en ?? null,
+          profile.venueNameTh ?? profile.name_th ?? null,
+          profile.venueType ?? profile.venue_type ?? null,
+          profile.addressLine1 ?? profile.address_line1 ?? null,
           profile.subdistrict ?? null,
           profile.district ?? null,
           profile.province ?? null,
           profile.postcode ?? null,
-          profile.googleMapsUrl ?? null,
-          profile.openingHours ?? null,
-          profile.defaultSlotDurationMins ?? null,
+          profile.googleMapsUrl ?? profile.google_maps_url ?? null,
+          profile.openingHours ?? profile.opening_hours ?? null,
+          profile.defaultSlotDurationMins ?? profile.default_slot_duration_mins ?? null,
           profile.email ?? null,
           profile.phone ?? null,
+          profile.sports_supported ?? profile.sportsSupported ?? [],
           venueId,
         ],
       );
@@ -261,9 +270,9 @@ serve(async (req) => {
     }
 
     if (req.method === "POST" && pathname.endsWith("/courts")) {
-      const venueId = pathname.split("/")[3];
+      const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, user.id, venueId);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
       const body = await parseJsonBody(req);
       const courts = Array.isArray(body.courts) ? body.courts : [];
@@ -317,9 +326,9 @@ serve(async (req) => {
     }
 
     if (req.method === "POST" && pathname.endsWith("/photos")) {
-      const venueId = pathname.split("/")[3];
+      const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, user.id, venueId);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
       const body = await parseJsonBody(req);
       const photos = Array.isArray(body.photos) ? body.photos : [];
@@ -338,10 +347,43 @@ serve(async (req) => {
       return jsonResponse({ ok: true });
     }
 
-    if (req.method === "POST" && pathname.endsWith("/submit")) {
-      const venueId = pathname.split("/")[3];
+    if (req.method === "GET" && pathname === "/api/venue") {
+      const { rows } = await client.queryObject(
+        "select * from public.venues where owner_id = $1 order by created_at asc limit 1",
+        [adminUserId],
+      );
+      return jsonResponse(rows[0] ?? null);
+    }
+
+    if (req.method === "GET" && pathname.endsWith("/courts")) {
+      const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, user.id, venueId);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const { rows } = await client.queryObject(
+        "select * from public.courts where venue_id = $1 order by name asc",
+        [venueId],
+      );
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "GET" && pathname.endsWith("/photos")) {
+      const venueId = parseId(pathname.split("/")[3]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+      const { rows } = await client.queryObject(
+        "select * from public.photos where venue_id = $1 order by created_at desc",
+        [venueId],
+      );
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "POST" && pathname.endsWith("/submit")) {
+      const venueId = parseId(pathname.split("/")[3]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
 
       await client.queryObject(
@@ -351,10 +393,201 @@ serve(async (req) => {
       return jsonResponse({ ok: true });
     }
 
-    if (req.method === "GET" && pathname.startsWith("/api/venues/") && pathname.endsWith("/bookings")) {
-      const venueId = pathname.split("/")[3];
+    if (req.method === "POST" && pathname.endsWith("/bookings") && !pathname.endsWith("/bookings/list")) {
+      const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, user.id, venueId);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+      const body = await parseJsonBody(req);
+
+      const slotStart = body.slotStart ?? body.start_at ?? body.startAt;
+      const slotEnd = body.slotEnd ?? body.end_at ?? body.endAt;
+      if (!slotStart || !slotEnd) {
+        return jsonResponse({ error: "slotStart and slotEnd are required" }, 400);
+      }
+
+      const { rows } = await client.queryObject(
+        `
+          insert into public.bookings (
+            venue_id,
+            court_id,
+            slot_start,
+            slot_end,
+            duration_minutes,
+            status,
+            total_price,
+            currency,
+            notes,
+            booking_number,
+            player_name,
+            player_email,
+            source,
+            payment_status
+          )
+          values ($1,$2,$3,$4,$5,coalesce($6,'pending'),$7,coalesce($8,'THB'),$9,$10,$11,$12,$13,$14)
+          returning *
+        `,
+        [
+          venueId,
+          body.courtId,
+          slotStart,
+          slotEnd,
+          body.durationMinutes ?? body.duration ?? 60,
+          body.status ?? null,
+          body.totalPrice ?? body.amount ?? 0,
+          body.currency ?? "THB",
+          body.notes ?? null,
+          body.bookingNumber ?? null,
+          body.playerName ?? body.player_name ?? null,
+          body.playerEmail ?? body.player_email ?? null,
+          body.source ?? "Manual",
+          body.paymentStatus ?? body.payment_status ?? null,
+        ],
+      );
+      return jsonResponse(rows[0]);
+    }
+
+    if (req.method === "GET" && pathname.endsWith("/bookings/list")) {
+      const venueId = parseId(pathname.split("/")[3]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const { rows } = await client.queryObject(
+        `
+          select
+            b.*,
+            c.name as court_name,
+            c.sport_type as sport_type,
+            c.sport as sport
+          from public.bookings b
+          left join public.courts c on c.id = b.court_id
+          where b.venue_id = $1
+          order by b.created_at desc
+        `,
+        [venueId],
+      );
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "PUT" && pathname.startsWith("/api/bookings/")) {
+      const bookingId = parseId(pathname.split("/")[3]);
+      if (!bookingId) return jsonResponse({ error: "Booking not found" }, 404);
+      const body = await parseJsonBody(req);
+      const { rows } = await client.queryObject<{ venue_id: number }>(
+        "select venue_id from public.bookings where id = $1",
+        [bookingId],
+      );
+      const venueId = rows[0]?.venue_id;
+      if (!venueId) return jsonResponse({ error: "Booking not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const { rows: updated } = await client.queryObject(
+        `
+          update public.bookings
+          set
+            status = coalesce($2, status),
+            payment_status = coalesce($3, payment_status),
+            cancellation_reason = $4,
+            cancellation_timestamp = $5,
+            updated_at = now()
+          where id = $1
+          returning *
+        `,
+        [
+          bookingId,
+          body.status ?? null,
+          body.paymentStatus ?? body.payment_status ?? null,
+          body.cancellationReason ?? null,
+          body.cancellationTimestamp ?? null,
+        ],
+      );
+      return jsonResponse(updated[0]);
+    }
+
+    if (req.method === "PUT" && pathname.startsWith("/api/courts/")) {
+      const courtId = parseId(pathname.split("/")[3]);
+      if (!courtId) return jsonResponse({ error: "Court not found" }, 404);
+      const body = await parseJsonBody(req);
+
+      const { rows: venueRows } = await client.queryObject<{ venue_id: number }>(
+        "select venue_id from public.courts where id = $1",
+        [courtId],
+      );
+      const venueId = venueRows[0]?.venue_id;
+      if (!venueId) return jsonResponse({ error: "Court not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const { rows } = await client.queryObject(
+        `
+          update public.courts
+          set
+            name = coalesce($2, name),
+            sport_type = $3,
+            sport = $4,
+            status = coalesce($5, status),
+            environment = $6,
+            weekday_price_per_hour_thb = $7,
+            weekend_price_per_hour_thb = $8,
+            updated_at = now()
+          where id = $1
+          returning *
+        `,
+        [
+          courtId,
+          body.name ?? null,
+          body.sport_type ?? null,
+          body.sport ?? null,
+          body.status ?? null,
+          body.environment ?? null,
+          body.weekday_price_per_hour_thb ?? null,
+          body.weekend_price_per_hour_thb ?? null,
+        ],
+      );
+      return jsonResponse(rows[0]);
+    }
+
+    if (req.method === "PUT" && pathname.startsWith("/payments/")) {
+      const paymentId = parseId(pathname.split("/")[2]);
+      if (!paymentId) return jsonResponse({ error: "Payment not found" }, 404);
+      const body = await parseJsonBody(req);
+
+      const { rows: venueRows } = await client.queryObject<{ venue_id: number }>(
+        "select venue_id from public.payments where id = $1",
+        [paymentId],
+      );
+      const venueId = venueRows[0]?.venue_id;
+      if (!venueId) return jsonResponse({ error: "Payment not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const { rows } = await client.queryObject(
+        `
+          update public.payments
+          set
+            status = coalesce($2, status),
+            payment_method = $3,
+            transaction_id = $4,
+            updated_at = now()
+          where id = $1
+          returning *
+        `,
+        [
+          paymentId,
+          body.status ?? null,
+          body.payment_method ?? null,
+          body.transaction_id ?? null,
+        ],
+      );
+      return jsonResponse(rows[0]);
+    }
+
+    if (req.method === "GET" && pathname.startsWith("/api/venues/") && pathname.endsWith("/bookings")) {
+      const venueId = parseId(pathname.split("/")[3]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
 
       const start = url.searchParams.get("start");
@@ -380,22 +613,16 @@ serve(async (req) => {
             b.id,
             b.court_id as "courtId",
             c.name as "courtName",
-            coalesce(b.start_at, (b.date + b.time) at time zone 'Asia/Bangkok') as "startAt",
-            coalesce(
-              b.end_at,
-              coalesce(b.start_at, (b.date + b.time) at time zone 'Asia/Bangkok') + make_interval(mins => b.duration)
-            ) as "endAt",
+            b.slot_start as "startAt",
+            b.slot_end as "endAt",
             b.status,
             b.player_name as "eventName"
           from public.bookings b
           join public.courts c on c.id = b.court_id
           where b.venue_id = $1
             and b.status in ('pending', 'paid', 'confirmed', 'held')
-            and coalesce(b.start_at, (b.date + b.time) at time zone 'Asia/Bangkok') < $3
-            and coalesce(
-              b.end_at,
-              coalesce(b.start_at, (b.date + b.time) at time zone 'Asia/Bangkok') + make_interval(mins => b.duration)
-            ) > $2
+            and b.slot_start < $3
+            and b.slot_end > $2
             ${courtFilter}
           order by "startAt" asc
         `,
@@ -414,8 +641,134 @@ serve(async (req) => {
       return jsonResponse(payload);
     }
 
+    if (req.method === "GET" && pathname.endsWith("/recurring-bookings")) {
+      const venueId = parseId(pathname.split("/")[3]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const { rows } = await client.queryObject(
+        `
+          select
+            rb.*,
+            c.name as court_name
+          from public.recurring_bookings rb
+          left join public.courts c on c.id = rb.court_id
+          where rb.venue_id = $1
+          order by rb.day_of_week asc, rb.time asc
+        `,
+        [venueId],
+      );
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "POST" && pathname.endsWith("/recurring-bookings")) {
+      const venueId = parseId(pathname.split("/")[3]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+      const body = await parseJsonBody(req);
+
+      const { rows } = await client.queryObject(
+        `
+          insert into public.recurring_bookings (
+            venue_id,
+            court_id,
+            day_of_week,
+            time,
+            duration,
+            player_name,
+            player_email,
+            status,
+            start_date,
+            end_date
+          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          returning *
+        `,
+        [
+          venueId,
+          body.court_id ?? body.courtId,
+          body.day_of_week ?? body.dayOfWeek,
+          body.time,
+          body.duration ?? body.duration_minutes ?? 60,
+          body.player_name ?? body.playerName,
+          body.player_email ?? body.playerEmail,
+          body.status ?? "active",
+          body.start_date ?? body.startDate,
+          body.end_date ?? body.endDate ?? null,
+        ],
+      );
+      return jsonResponse(rows[0]);
+    }
+
+    if (req.method === "PUT" && pathname.startsWith("/api/recurring-bookings/")) {
+      const recurringId = parseId(pathname.split("/")[3]);
+      if (!recurringId) return jsonResponse({ error: "Recurring booking not found" }, 404);
+      const body = await parseJsonBody(req);
+
+      const { rows: venueRows } = await client.queryObject<{ venue_id: number }>(
+        "select venue_id from public.recurring_bookings where id = $1",
+        [recurringId],
+      );
+      const venueId = venueRows[0]?.venue_id;
+      if (!venueId) return jsonResponse({ error: "Recurring booking not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const { rows } = await client.queryObject(
+        `
+          update public.recurring_bookings
+          set
+            day_of_week = coalesce($2, day_of_week),
+            time = coalesce($3, time),
+            duration = coalesce($4, duration),
+            player_name = coalesce($5, player_name),
+            player_email = $6,
+            status = coalesce($7, status),
+            start_date = coalesce($8, start_date),
+            end_date = $9,
+            updated_at = now()
+          where id = $1
+          returning *
+        `,
+        [
+          recurringId,
+          body.day_of_week ?? body.dayOfWeek ?? null,
+          body.time ?? null,
+          body.duration ?? null,
+          body.player_name ?? body.playerName ?? null,
+          body.player_email ?? body.playerEmail ?? null,
+          body.status ?? null,
+          body.start_date ?? body.startDate ?? null,
+          body.end_date ?? body.endDate ?? null,
+        ],
+      );
+      return jsonResponse(rows[0]);
+    }
+
+    if (req.method === "DELETE" && pathname.startsWith("/api/recurring-bookings/")) {
+      const recurringId = parseId(pathname.split("/")[3]);
+      if (!recurringId) return jsonResponse({ error: "Recurring booking not found" }, 404);
+
+      const { rows: venueRows } = await client.queryObject<{ venue_id: number }>(
+        "select venue_id from public.recurring_bookings where id = $1",
+        [recurringId],
+      );
+      const venueId = venueRows[0]?.venue_id;
+      if (!venueId) return jsonResponse({ error: "Recurring booking not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      await client.queryObject("delete from public.recurring_bookings where id = $1", [recurringId]);
+      return jsonResponse({ ok: true });
+    }
+
+    if (req.method === "POST" && pathname.startsWith("/api/recurring-bookings/") && pathname.endsWith("/generate")) {
+      return jsonResponse(0);
+    }
+
     if (req.method === "GET" && pathname === "/payments/summary") {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
 
       const status = url.searchParams.get("status");
@@ -461,7 +814,7 @@ serve(async (req) => {
             count(*) filter (where upper(p.status) = 'REFUNDED') as refunded_count,
             count(*) as total_count,
             (
-              select coalesce(sum(b.amount::numeric), 0)
+              select coalesce(sum(b.total_price::numeric), 0)
               from public.bookings b
               where b.venue_id = $1
                 and b.status = 'pending'
@@ -494,7 +847,7 @@ serve(async (req) => {
     }
 
     if (req.method === "GET" && pathname === "/payments") {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
 
       const status = url.searchParams.get("status");
@@ -575,7 +928,7 @@ serve(async (req) => {
     }
 
     if (req.method === "GET" && pathname === "/payments/export") {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
 
       const status = url.searchParams.get("status");
@@ -655,7 +1008,7 @@ serve(async (req) => {
     }
 
     if (req.method === "GET" && pathname === "/payments/pending") {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
 
       const query = url.searchParams.get("q");
@@ -686,7 +1039,7 @@ serve(async (req) => {
             b.player_name,
             b.date,
             b.time,
-            b.amount,
+            b.total_price as amount,
             b.status,
             b.created_at,
             c.name as court_name
@@ -719,7 +1072,7 @@ serve(async (req) => {
     }
 
     if (req.method === "GET" && pathname === "/crm/memberships") {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
 
       const status = url.searchParams.get("status");
@@ -766,7 +1119,7 @@ serve(async (req) => {
     }
 
     if (req.method === "POST" && pathname === "/crm/memberships") {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
       const payload = await parseJsonBody(req);
       if (!payload?.name?.trim()) return jsonResponse({ error: "Name is required" }, 400);
@@ -811,7 +1164,7 @@ serve(async (req) => {
     }
 
     if (req.method === "PUT" && pathname.startsWith("/crm/memberships/")) {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
       const membershipId = pathname.split("/")[3];
       const payload = await parseJsonBody(req);
@@ -854,7 +1207,7 @@ serve(async (req) => {
     }
 
     if (req.method === "GET" && pathname === "/crm/players") {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
 
       const query = url.searchParams.get("q");
@@ -892,8 +1245,8 @@ serve(async (req) => {
             select
               b.player_id,
               count(*)::int as total_bookings,
-              coalesce(sum(b.amount::numeric), 0)::numeric as total_spend,
-              max(coalesce(b.start_at, (b.date + b.time) at time zone 'Asia/Bangkok')) as last_visit
+              coalesce(sum(b.total_price::numeric), 0)::numeric as total_spend,
+              max(b.slot_start) as last_visit
             from public.bookings b
             where b.venue_id = $1
             group by b.player_id
@@ -946,7 +1299,7 @@ serve(async (req) => {
     }
 
     if (req.method === "POST" && pathname === "/crm/players") {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
       const payload = await parseJsonBody(req);
       if (!payload?.name?.trim()) return jsonResponse({ error: "Name is required" }, 400);
@@ -969,7 +1322,7 @@ serve(async (req) => {
     }
 
     if (req.method === "PUT" && pathname.startsWith("/crm/players/") && pathname.split("/").length === 4) {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
       const playerId = pathname.split("/")[3];
       const payload = await parseJsonBody(req);
@@ -998,7 +1351,7 @@ serve(async (req) => {
     }
 
     if (req.method === "POST" && pathname.endsWith("/membership")) {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
       const playerId = pathname.split("/")[3];
       const payload = await parseJsonBody(req);
@@ -1041,7 +1394,7 @@ serve(async (req) => {
     }
 
     if (req.method === "POST" && pathname.endsWith("/notes")) {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
       const playerId = pathname.split("/")[3];
       const payload = await parseJsonBody(req);
@@ -1053,13 +1406,13 @@ serve(async (req) => {
           values ($1, $2, $3, $4)
           returning *
         `,
-        [venueId, playerId, payload.note.trim(), user.id],
+        [venueId, playerId, payload.note.trim(), adminUserId],
       );
       return jsonResponse(rows[0]);
     }
 
     if (req.method === "GET" && pathname.startsWith("/crm/players/") && pathname.split("/").length === 4) {
-      const venueId = await getPrimaryVenueId(client, user.id);
+      const venueId = await getPrimaryVenueId(client, adminUserId);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
       const playerId = pathname.split("/")[3];
 
@@ -1069,8 +1422,8 @@ serve(async (req) => {
             select
               b.player_id,
               count(*)::int as total_bookings,
-              coalesce(sum(b.amount::numeric), 0)::numeric as total_spend,
-              max(coalesce(b.start_at, (b.date + b.time) at time zone 'Asia/Bangkok')) as last_visit
+              coalesce(sum(b.total_price::numeric), 0)::numeric as total_spend,
+              max(b.slot_start) as last_visit
             from public.bookings b
             where b.player_id = $1
             group by b.player_id
@@ -1124,7 +1477,7 @@ serve(async (req) => {
             time,
             start_at,
             end_at,
-            amount,
+            total_price as amount,
             status,
             membership_type,
             final_price,

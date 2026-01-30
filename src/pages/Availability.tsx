@@ -30,7 +30,7 @@ import { apiFetch } from "@/lib/apiClient";
 import { addDays, addMinutes, addWeeks, format, startOfDay, startOfWeek } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { BookingEvent, BookingStatus } from "@/types/availability";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch } from "@/lib/apiClient";
 
 const Availability = () => {
   const [selectedCourt, setSelectedCourt] = useState("all");
@@ -439,25 +439,13 @@ const Availability = () => {
 
     const amount = ((hourlyRate * durationMinutes) / 60).toFixed(2);
 
-    const { data: conflicts, error: conflictError } = await supabase
-      .from("bookings")
-      .select("id")
-      .eq("court_id", overrideForm.courtId)
-      .in("status", ["pending", "confirmed", "paid", "held"])
-      .lt("start_at", endAt)
-      .gt("end_at", startAt)
-      .limit(1);
+    const conflicts = (await apiFetch(
+      `/api/venues/${selected.venue_id}/bookings?start=${encodeURIComponent(
+        startAt,
+      )}&end=${encodeURIComponent(endAt)}&courtId=${overrideForm.courtId}`,
+    )) as Array<{ id: string }>;
 
-    if (conflictError) {
-      toast({
-        title: "Failed to check availability",
-        description: conflictError.message,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (conflicts && conflicts.length > 0) {
+    if (Array.isArray(conflicts) && conflicts.length > 0) {
       toast({
         title: "Time unavailable",
         description: "This court already has a booking during that time.",
@@ -466,33 +454,25 @@ const Availability = () => {
       return;
     }
 
-    const { error } = await supabase.from("bookings").insert({
-      venue_id: selected.venue_id,
-      booking_number: generateBookingNumber(),
-      date: overrideForm.date,
-      time: overrideForm.startTime,
-      start_at: startAt,
-      end_at: endAt,
-      court_id: overrideForm.courtId,
-      sport: overrideForm.sport,
-      player_name: overrideForm.eventName,
-      player_email: "no-email@playpal.local",
-      status: "paid",
-      payment_status: "Paid",
-      source: "Manual",
-      amount,
-      duration: durationMinutes,
-      notes: null,
+    await apiFetch(`/api/venues/${selected.venue_id}/bookings`, {
+      method: "POST",
+      body: JSON.stringify({
+        venueId: selected.venue_id,
+        courtId: overrideForm.courtId,
+        slotStart: startAt,
+        slotEnd: endAt,
+        durationMinutes,
+        status: "paid",
+        totalPrice: amount,
+        currency: "THB",
+        notes: null,
+        bookingNumber: generateBookingNumber(),
+        playerName: overrideForm.eventName,
+        playerEmail: "no-email@playpal.local",
+        source: "Manual",
+        paymentStatus: "Paid",
+      }),
     });
-
-    if (error) {
-      toast({
-        title: "Failed to create booking",
-        description: error.message,
-        variant: "destructive",
-      });
-      return;
-    }
 
     toast({ title: "Booking created" });
     setOverrideDialogOpen(false);

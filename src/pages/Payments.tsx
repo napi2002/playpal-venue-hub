@@ -22,7 +22,7 @@ import {
 import { Download, Filter, Search } from "lucide-react";
 import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuthSession } from "@/contexts/AuthContext";
 
 const PAGE_SIZE = 10;
 
@@ -62,7 +62,9 @@ type PendingBooking = {
   court_name: string | null;
   date: string | null;
   time: string | null;
-  amount: number | string;
+  total_price?: number | string | null;
+  final_price?: number | string | null;
+  amount?: number | string | null;
   status: string | null;
   created_at: string;
 };
@@ -74,6 +76,7 @@ type PendingBookingsResponse = {
 
 const Payments = () => {
   const { toast } = useToast();
+  const { session } = useAuthSession();
   const [statusFilter, setStatusFilter] = useState<"all" | PaymentStatus>("all");
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -194,8 +197,7 @@ const Payments = () => {
 
   const handleExport = async () => {
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token;
+      const token = session?.access_token;
       const response = await fetch(
         `${import.meta.env.VITE_API_URL || "http://localhost:3001"}/payments/export?${queryParams.toString()}`,
         {
@@ -489,7 +491,7 @@ const Payments = () => {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          ฿{Number(booking.amount).toFixed(2)}
+                          ฿{Number(booking.final_price ?? booking.total_price ?? booking.amount ?? 0).toFixed(2)}
                         </TableCell>
                       </TableRow>
                     ))

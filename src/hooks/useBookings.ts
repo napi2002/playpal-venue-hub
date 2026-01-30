@@ -1,10 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
+import { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthSession } from "@/contexts/AuthContext";
+import { apiFetch } from "@/lib/apiClient";
+import { useVenue } from "@/hooks/useVenue";
 
-type Booking = Tables<"bookings">;
 type BookingInsert = TablesInsert<"bookings">;
 type BookingUpdate = TablesUpdate<"bookings">;
 
@@ -12,34 +12,41 @@ export const useBookings = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { session } = useAuthSession();
+  const { venue } = useVenue();
   const getErrorMessage = (error: unknown, fallback: string) =>
     error instanceof Error && error.message ? error.message : fallback;
 
   const { data: bookings = [], isLoading } = useQuery({
-    queryKey: ["bookings", session?.user?.id],
-    enabled: !!session?.user?.id,
+    queryKey: ["bookings", session?.user?.id, venue?.id],
+    enabled: !!session?.user?.id && !!venue?.id,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("bookings")
-        .select("*, courts(name)")
-        .order("date", { ascending: false })
-        .order("time", { ascending: false });
-
-      if (error) throw error;
-      return data;
+      const data = await apiFetch(`/api/venues/${venue?.id}/bookings/list`);
+      return Array.isArray(data) ? data : [];
     },
   });
 
   const addBooking = useMutation({
     mutationFn: async (booking: BookingInsert) => {
-      const { data, error } = await supabase
-        .from("bookings")
-        .insert(booking)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      const response = await apiFetch(`/api/venues/${booking.venue_id}/bookings`, {
+        method: "POST",
+        body: JSON.stringify({
+          venueId: booking.venue_id,
+          courtId: booking.court_id,
+          slotStart: booking.slot_start,
+          slotEnd: booking.slot_end,
+          durationMinutes: booking.duration_minutes,
+          status: booking.status,
+          totalPrice: booking.total_price,
+          currency: booking.currency ?? "THB",
+          notes: booking.notes,
+          bookingNumber: booking.booking_number,
+          playerName: booking.player_name,
+          playerEmail: booking.player_email,
+          source: booking.source,
+          paymentStatus: booking.payment_status,
+        }),
+      });
+      return response;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bookings"] });
@@ -59,15 +66,16 @@ export const useBookings = () => {
 
   const updateBooking = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: BookingUpdate }) => {
-      const { data, error } = await supabase
-        .from("bookings")
-        .update(updates)
-        .eq("id", id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      const response = await apiFetch(`/api/bookings/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          status: updates.status,
+          paymentStatus: updates.payment_status,
+          cancellationReason: updates.cancellation_reason,
+          cancellationTimestamp: updates.cancellation_timestamp,
+        }),
+      });
+      return response;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bookings"] });
@@ -87,12 +95,13 @@ export const useBookings = () => {
 
   const deleteBooking = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("bookings")
-        .delete()
-        .eq("id", id);
-
-      if (error) throw error;
+      await apiFetch(`/api/bookings/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          status: "cancelled",
+          cancellationTimestamp: new Date().toISOString(),
+        }),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bookings"] });

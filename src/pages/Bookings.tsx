@@ -88,21 +88,32 @@ const Bookings = () => {
 
   const filteredBookings = bookings.filter((booking) => {
     const matchesStatus = statusFilter === "all" || booking.status === statusFilter;
+    const searchText = searchQuery.toLowerCase();
     const matchesSearch =
       searchQuery === "" ||
-      booking.player_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      booking.booking_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (booking.courts?.name && booking.courts.name.toLowerCase().includes(searchQuery.toLowerCase()));
+      (booking.player_name ?? "").toLowerCase().includes(searchText) ||
+      (booking.booking_number ?? "").toLowerCase().includes(searchText) ||
+      (booking.court_name ?? "").toLowerCase().includes(searchText);
     return matchesStatus && matchesSearch;
   });
 
-  const formatDateTime = (date: string, time: string) => {
+  const formatDateTime = (date?: string | null, time?: string | null, startAt?: string | null) => {
     try {
-      const dateTime = new Date(`${date}T${time}`);
-      return format(dateTime, "MMM dd, yyyy HH:mm");
+      if (date && time) {
+        const dateTime = new Date(`${date}T${time}`);
+        return format(dateTime, "MMM dd, yyyy HH:mm");
+      }
+      if (startAt) {
+        return format(new Date(startAt), "MMM dd, yyyy HH:mm");
+      }
     } catch {
-      return `${date} ${time}`;
+      if (date && time) return `${date} ${time}`;
     }
+    return "—";
+  };
+
+  const getBookingAmount = (booking: (typeof bookings)[number]) => {
+    return Number(booking.final_price ?? booking.total_price ?? booking.amount ?? 0);
   };
 
   const dayLabel = (day: number) => {
@@ -111,8 +122,8 @@ const Bookings = () => {
   };
 
   const recurringCourtName = (recurring: typeof recurringBookings[number]) => {
-    const withCourt = recurring as typeof recurring & { courts?: { name?: string } };
-    return withCourt.courts?.name || recurring.court_id;
+    const withCourt = recurring as typeof recurring & { court_name?: string };
+    return withCourt.court_name || recurring.court_id;
   };
 
   const handleStatusChange = (bookingId: string, status: BookingStatus) => {
@@ -315,12 +326,12 @@ const Bookings = () => {
                       <TableRow key={booking.id} className="hover:bg-muted/30">
                         <TableCell className="font-medium">{booking.booking_number}</TableCell>
                         <TableCell className="whitespace-nowrap">
-                          {formatDateTime(booking.date, booking.time)}
+                          {formatDateTime(booking.date, booking.time, booking.slot_start ?? booking.start_at)}
                         </TableCell>
-                        <TableCell>{booking.courts?.name || booking.court_id}</TableCell>
+                        <TableCell>{booking.court_name || booking.court_id}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-xs">
-                            {booking.sport}
+                            {booking.sport ?? booking.sport_type ?? "—"}
                           </Badge>
                         </TableCell>
                         <TableCell>
@@ -349,7 +360,7 @@ const Bookings = () => {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          ฿{booking.amount}
+                          ฿{getBookingAmount(booking).toFixed(2)}
                         </TableCell>
                         <TableCell>
                           <DropdownMenu>

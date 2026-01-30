@@ -1,10 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import type { Tables, TablesUpdate } from "@/integrations/supabase/types";
+import type { TablesUpdate } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthSession } from "@/contexts/AuthContext";
+import { apiFetch } from "@/lib/apiClient";
 
-type Venue = Tables<"venues">;
 type VenueUpdate = TablesUpdate<"venues">;
 
 const getErrorMessage = (error: unknown, fallback: string) =>
@@ -19,29 +18,18 @@ export const useVenue = () => {
     queryKey: ["venue", session?.user?.id],
     enabled: !!session?.user?.id,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("venues")
-        .select("*")
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) throw error;
-      return data as Venue | null;
+      const data = await apiFetch("/api/venue");
+      return data ?? null;
     },
   });
 
   const updateVenue = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: VenueUpdate }) => {
-      const { data, error } = await supabase
-        .from("venues")
-        .update(updates)
-        .eq("id", id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data as Venue;
+      const response = await apiFetch(`/api/venues/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(updates),
+      });
+      return response;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["venue"] });
@@ -68,17 +56,27 @@ export const useVenue = () => {
       email: string | null;
       tax_information: string | null;
     }) => {
-      const { data, error } = await supabase.rpc("create_venue_for_user", {
-        _name: payload.name,
-        _timezone: payload.timezone,
-        _address: payload.address,
-        _phone: payload.phone,
-        _email: payload.email,
-        _tax_information: payload.tax_information,
+      const response = await apiFetch("/api/venues/draft", {
+        method: "POST",
+        body: JSON.stringify({
+          profile: {
+            venueNameEn: payload.name ?? "New Venue",
+            venueNameTh: null,
+            venueType: null,
+            addressLine1: payload.address ?? null,
+            subdistrict: null,
+            district: null,
+            province: null,
+            postcode: null,
+            googleMapsUrl: null,
+            openingHours: null,
+            defaultSlotDurationMins: null,
+            email: payload.email ?? null,
+            phone: payload.phone ?? null,
+          },
+        }),
       });
-
-      if (error) throw error;
-      return data as Venue;
+      return response;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["venue"] });

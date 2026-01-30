@@ -1,10 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
+import { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthSession } from "@/contexts/AuthContext";
+import { apiFetch } from "@/lib/apiClient";
+import { useVenue } from "@/hooks/useVenue";
 
-type RecurringBooking = Tables<"recurring_bookings">;
 type RecurringBookingInsert = TablesInsert<"recurring_bookings">;
 type RecurringBookingUpdate = TablesUpdate<"recurring_bookings">;
 
@@ -12,34 +12,26 @@ export const useRecurringBookings = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { session } = useAuthSession();
+  const { venue } = useVenue();
   const getErrorMessage = (error: unknown, fallback: string) =>
     error instanceof Error && error.message ? error.message : fallback;
 
   const { data: recurringBookings = [], isLoading } = useQuery({
-    queryKey: ["recurring_bookings", session?.user?.id],
-    enabled: !!session?.user?.id,
+    queryKey: ["recurring_bookings", session?.user?.id, venue?.id],
+    enabled: !!session?.user?.id && !!venue?.id,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("recurring_bookings")
-        .select("*, courts(name)")
-        .order("day_of_week", { ascending: true })
-        .order("time", { ascending: true });
-
-      if (error) throw error;
-      return data;
+      const data = await apiFetch(`/api/venues/${venue?.id}/recurring-bookings`);
+      return Array.isArray(data) ? data : [];
     },
   });
 
   const addRecurringBooking = useMutation({
     mutationFn: async (booking: RecurringBookingInsert) => {
-      const { data, error } = await supabase
-        .from("recurring_bookings")
-        .insert(booking)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      const response = await apiFetch(`/api/venues/${venue?.id}/recurring-bookings`, {
+        method: "POST",
+        body: JSON.stringify(booking),
+      });
+      return response;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["recurring_bookings"] });
@@ -59,15 +51,11 @@ export const useRecurringBookings = () => {
 
   const updateRecurringBooking = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: RecurringBookingUpdate }) => {
-      const { data, error } = await supabase
-        .from("recurring_bookings")
-        .update(updates)
-        .eq("id", id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      const response = await apiFetch(`/api/recurring-bookings/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(updates),
+      });
+      return response;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["recurring_bookings"] });
@@ -87,12 +75,7 @@ export const useRecurringBookings = () => {
 
   const deleteRecurringBooking = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("recurring_bookings")
-        .delete()
-        .eq("id", id);
-
-      if (error) throw error;
+      await apiFetch(`/api/recurring-bookings/${id}`, { method: "DELETE" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["recurring_bookings"] });
@@ -112,13 +95,11 @@ export const useRecurringBookings = () => {
 
   const generateBookings = useMutation({
     mutationFn: async ({ id, weeksAhead = 4 }: { id: string; weeksAhead?: number }) => {
-      const { data, error } = await supabase.rpc("generate_bookings_from_recurring", {
-        _recurring_booking_id: id,
-        _weeks_ahead: weeksAhead,
+      const response = await apiFetch(`/api/recurring-bookings/${id}/generate`, {
+        method: "POST",
+        body: JSON.stringify({ weeksAhead }),
       });
-
-      if (error) throw error;
-      return data;
+      return response;
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ["bookings"] });

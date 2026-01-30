@@ -34,7 +34,7 @@ import { useVenue } from "@/hooks/useVenue";
 import { useCourts } from "@/hooks/useCourts";
 import { usePhotos } from "@/hooks/usePhotos";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch } from "@/lib/apiClient";
 import { useQueryClient } from "@tanstack/react-query";
 
 const Venue = () => {
@@ -246,12 +246,10 @@ const Venue = () => {
           : null,
       };
 
-      const { error } = await supabase
-        .from("courts")
-        .update(payload)
-        .eq("id", editingCourt.id);
-
-      if (error) throw error;
+      await apiFetch(`/api/courts/${editingCourt.id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
 
       toast({ title: "Court updated" });
       setEditingCourt(null);

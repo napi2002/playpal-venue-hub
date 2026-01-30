@@ -45,6 +45,7 @@ const Dashboard = () => {
   );
 
   const getBookingStart = (booking: typeof bookings[number]) => {
+    if (booking.slot_start) return new Date(booking.slot_start);
     if (booking.start_at) return new Date(booking.start_at);
     if (booking.date && booking.time) {
       return new Date(`${booking.date}T${booking.time}+07:00`);
@@ -53,9 +54,10 @@ const Dashboard = () => {
   };
 
   const getBookingEnd = (booking: typeof bookings[number]) => {
+    if (booking.slot_end) return new Date(booking.slot_end);
     if (booking.end_at) return new Date(booking.end_at);
     const start = getBookingStart(booking);
-    const duration = Number(booking.duration ?? 60);
+    const duration = Number(booking.duration_minutes ?? booking.duration ?? 60);
     return new Date(start.getTime() + duration * 60 * 1000);
   };
 
@@ -113,7 +115,7 @@ const Dashboard = () => {
     return todaysBookings.reduce((total, booking) => {
       const status = getPaymentStatus(booking);
       if (status === "paid" || status === "confirmed") {
-        return total + Number(booking.amount ?? 0);
+        return total + Number(booking.final_price ?? booking.total_price ?? booking.amount ?? 0);
       }
       return total;
     }, 0);
@@ -246,11 +248,11 @@ const Dashboard = () => {
         bangkokDateKey.format(start),
         bangkokTime.format(start),
         bangkokTime.format(end),
-        booking.courts?.name ?? "",
+        booking.court_name ?? "",
         booking.sport ?? "",
         booking.player_name ?? "",
         getPaymentStatus(booking),
-        Number(booking.amount ?? 0).toFixed(2),
+        Number(booking.final_price ?? booking.total_price ?? booking.amount ?? 0).toFixed(2),
       ].map((value) => `"${String(value).replace(/\"/g, '\"\"')}"`);
       csvRows.push(values.join(","));
     });
@@ -405,17 +407,19 @@ const Dashboard = () => {
                 >
                   <div>
                     <div className="text-sm font-medium">
-                      {formatTimeRange(booking)} • {booking.courts?.name || "Court"}
+                      {formatTimeRange(booking)} • {booking.court_name || "Court"}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {booking.player_name} · {booking.sport}
+                      {booking.player_name ?? "Guest"} · {booking.sport ?? booking.sport_type ?? "—"}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Badge variant="outline" className={statusBadgeClass(getPaymentStatus(booking))}>
                       {getPaymentStatus(booking)}
                     </Badge>
-                    <span className="font-medium">฿{Number(booking.amount ?? 0).toFixed(2)}</span>
+                    <span className="font-medium">
+                      ฿{Number(booking.final_price ?? booking.total_price ?? booking.amount ?? 0).toFixed(2)}
+                    </span>
                   </div>
                 </button>
               ))}
