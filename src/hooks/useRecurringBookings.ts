@@ -23,6 +23,9 @@ export const useRecurringBookings = () => {
       const data = await apiFetch(`/api/venues/${venue?.id}/recurring-bookings`);
       return Array.isArray(data) ? data : [];
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const addRecurringBooking = useMutation({

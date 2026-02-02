@@ -250,11 +250,12 @@ const VenueOnboarding = () => {
       }
       const courtsCheck = courtsSchema.safeParse(courts);
       if (courtsCheck.success) {
-        const courtsResponse = await apiFetch(`/api/venues/${id}/courts`, {
+        await apiFetch(`/api/venues/${id}/courts`, {
           method: "POST",
           body: JSON.stringify({ courts }),
         });
-        const ids = (courtsResponse.courts || []).map((court: { id: string }) => court.id);
+        const courtsList = (await apiFetch(`/api/venues/${id}/courts`)) as Array<{ id: string }>;
+        const ids = Array.isArray(courtsList) ? courtsList.map((court) => String(court.id)) : [];
         if (ids.length) {
           setCourtIds(ids);
         }
@@ -334,12 +335,15 @@ const VenueOnboarding = () => {
         body: JSON.stringify({ profile, status: "DRAFT" }),
       });
 
-      const courtsResponse = await apiFetch(`/api/venues/${id}/courts`, {
+      await apiFetch(`/api/venues/${id}/courts`, {
         method: "POST",
         body: JSON.stringify({ courts }),
       });
 
-      const courtIdsFromApi: string[] = courtsResponse.courts.map((court: { id: string }) => court.id);
+      const courtsList = (await apiFetch(`/api/venues/${id}/courts`)) as Array<{ id: string }>;
+      const courtIdsFromApi: string[] = Array.isArray(courtsList)
+        ? courtsList.map((court) => String(court.id))
+        : [];
       setCourtIds(courtIdsFromApi);
 
       const photosPayload = photos.map((record) => {
@@ -448,6 +452,15 @@ const VenueOnboarding = () => {
                 <SelectItem value="TENNIS">Tennis</SelectItem>
                 <SelectItem value="PADEL">Padel</SelectItem>
                 <SelectItem value="BADMINTON">Badminton</SelectItem>
+                <SelectItem value="PICKLEBALL">Pickleball</SelectItem>
+                <SelectItem value="BASKETBALL">Basketball</SelectItem>
+                <SelectItem value="FOOTBALL">Football</SelectItem>
+                <SelectItem value="FUTSAL">Futsal</SelectItem>
+                <SelectItem value="GYM">Gym</SelectItem>
+                <SelectItem value="BOULDERING">Bouldering</SelectItem>
+                <SelectItem value="VOLLEYBALL">Volleyball</SelectItem>
+                <SelectItem value="BOWLING">Bowling</SelectItem>
+                <SelectItem value="SQUASH">Squash</SelectItem>
                 <SelectItem value="MULTI_SPORT">Multi-sport</SelectItem>
               </SelectContent>
             </Select>
@@ -683,6 +696,15 @@ const VenueOnboarding = () => {
                       <SelectItem value="TENNIS">Tennis</SelectItem>
                       <SelectItem value="PADEL">Padel</SelectItem>
                       <SelectItem value="BADMINTON">Badminton</SelectItem>
+                      <SelectItem value="PICKLEBALL">Pickleball</SelectItem>
+                      <SelectItem value="BASKETBALL">Basketball</SelectItem>
+                      <SelectItem value="FOOTBALL">Football</SelectItem>
+                      <SelectItem value="FUTSAL">Futsal</SelectItem>
+                      <SelectItem value="GYM">Gym</SelectItem>
+                      <SelectItem value="BOULDERING">Bouldering</SelectItem>
+                      <SelectItem value="VOLLEYBALL">Volleyball</SelectItem>
+                      <SelectItem value="BOWLING">Bowling</SelectItem>
+                      <SelectItem value="SQUASH">Squash</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

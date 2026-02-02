@@ -90,11 +90,28 @@ const Venue = () => {
     "PICKLEBALL",
     "BASKETBALL",
     "FOOTBALL",
-    "CLIMBING",
+    "FUTSAL",
+    "GYM",
+    "BOULDERING",
     "VOLLEYBALL",
+    "BOWLING",
     "SQUASH",
   ];
-  const venueTypeOptions = new Set(["TENNIS", "PADEL", "BADMINTON", "MULTI_SPORT"]);
+  const venueTypeOptions = new Set([
+    "TENNIS",
+    "PADEL",
+    "BADMINTON",
+    "PICKLEBALL",
+    "BASKETBALL",
+    "FOOTBALL",
+    "FUTSAL",
+    "GYM",
+    "BOULDERING",
+    "VOLLEYBALL",
+    "BOWLING",
+    "SQUASH",
+    "MULTI_SPORT",
+  ]);
 
   const sportsSupported = useMemo(() => {
     if (selectedSports.length > 0) return selectedSports;

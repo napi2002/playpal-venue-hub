@@ -1,10 +1,22 @@
 import { supabase } from "@/integrations/supabase/client";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const SUPABASE_PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID;
 
 export const apiFetch = async (path: string, options: RequestInit = {}) => {
   const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  let token = data.session?.access_token;
+  if (!token && SUPABASE_PROJECT_ID) {
+    try {
+      const stored = localStorage.getItem(`sb-${SUPABASE_PROJECT_ID}-auth-token`);
+      if (stored) {
+        const parsed = JSON.parse(stored) as { access_token?: string };
+        token = parsed.access_token;
+      }
+    } catch {
+      // Ignore malformed storage entries.
+    }
+  }
   const headers = new Headers(options.headers || {});
 
   if (token) {

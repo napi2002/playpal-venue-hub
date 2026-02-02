@@ -4,11 +4,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.77.0";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-const DATABASE_URL = Deno.env.get("DATABASE_URL");
+const DATABASE_URL = Deno.env.get("DATABASE_URL") ?? Deno.env.get("SUPABASE_DB_URL");
 const CORS_ORIGIN = Deno.env.get("CORS_ORIGIN") ?? "*";
 
 if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !DATABASE_URL) {
-  throw new Error("Missing SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, or DATABASE_URL");
+  throw new Error("Missing SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, or DATABASE_URL/SUPABASE_DB_URL");
 }
 
 const pool = new Pool(DATABASE_URL, 3, true);
@@ -106,7 +106,10 @@ serve(async (req) => {
   }
 
   const url = new URL(req.url);
-  const pathname = url.pathname.replace(/^\/functions\/v1/, "");
+  let pathname = url.pathname.replace(/^\/functions\/v1/, "");
+  if (pathname.startsWith("/api/payments")) {
+    pathname = pathname.replace("/api", "");
+  }
   const user = await getUser(req);
   if (!user) {
     return jsonResponse({ error: "Invalid auth token" }, 401);
@@ -151,7 +154,7 @@ serve(async (req) => {
       const profile = body.profile ?? {};
 
       const { rows: existing } = await client.queryObject<{ id: number }>(
-        "select id from public.venues where owner_id = $1 order by created_at asc limit 1",
+        "select id from public.venues where owner_id = $1 order by created_at desc limit 1",
         [adminUserId],
       );
       if (existing.length) {
@@ -349,7 +352,7 @@ serve(async (req) => {
 
     if (req.method === "GET" && pathname === "/api/venue") {
       const { rows } = await client.queryObject(
-        "select * from public.venues where owner_id = $1 order by created_at asc limit 1",
+        "select * from public.venues where owner_id = $1 order by created_at desc limit 1",
         [adminUserId],
       );
       return jsonResponse(rows[0] ?? null);
@@ -424,7 +427,7 @@ serve(async (req) => {
             source,
             payment_status
           )
-          values ($1,$2,$3,$4,$5,coalesce($6,'pending'),$7,coalesce($8,'THB'),$9,$10,$11,$12,$13,$14)
+          values ($1,$2,$3,$4,$5,coalesce($6,'pending')::public.booking_status,$7,coalesce($8,'THB'),$9,$10,$11,$12,$13,$14)
           returning *
         `,
         [
@@ -444,7 +447,52 @@ serve(async (req) => {
           body.paymentStatus ?? body.payment_status ?? null,
         ],
       );
-      return jsonResponse(rows[0]);
+      const booking = rows[0];
+      const paymentStatusRaw = String(booking?.payment_status ?? "").toLowerCase();
+      const bookingStatusRaw = String(booking?.status ?? "").toLowerCase();
+      const derivedPaymentStatus =
+        paymentStatusRaw === "paid" || paymentStatusRaw === "completed"
+          ? "completed"
+          : paymentStatusRaw === "pending"
+            ? "pending"
+            : paymentStatusRaw === "failed"
+              ? "failed"
+              : paymentStatusRaw === "refunded"
+                ? "refunded"
+                : bookingStatusRaw === "paid"
+                  ? "completed"
+                  : bookingStatusRaw === "confirmed"
+                    ? "pending"
+                    : null;
+
+      if (booking && derivedPaymentStatus) {
+        const amount = Number(booking.final_price ?? booking.total_price ?? 0);
+        await client.queryObject(
+          `
+            insert into public.payments (
+              booking_id,
+              venue_id,
+              user_id,
+              amount,
+              currency,
+              status,
+              payment_method
+            )
+            values ($1,$2,$3,$4,$5,$6,$7)
+          `,
+          [
+            booking.id,
+            booking.venue_id,
+            booking.user_id ?? null,
+            amount,
+            booking.currency ?? "THB",
+            derivedPaymentStatus,
+            body.paymentMethod ?? body.payment_method ?? null,
+          ],
+        );
+      }
+
+      return jsonResponse(booking);
     }
 
     if (req.method === "GET" && pathname.endsWith("/bookings/list")) {
@@ -487,7 +535,7 @@ serve(async (req) => {
         `
           update public.bookings
           set
-            status = coalesce($2, status),
+            status = coalesce($2::public.booking_status, status),
             payment_status = coalesce($3, payment_status),
             cancellation_reason = $4,
             cancellation_timestamp = $5,
@@ -503,7 +551,84 @@ serve(async (req) => {
           body.cancellationTimestamp ?? null,
         ],
       );
-      return jsonResponse(updated[0]);
+      const booking = updated[0];
+      const paymentStatusRaw = String(booking?.payment_status ?? "").toLowerCase();
+      const bookingStatusRaw = String(booking?.status ?? "").toLowerCase();
+      const derivedPaymentStatus =
+        paymentStatusRaw === "paid" || paymentStatusRaw === "completed"
+          ? "completed"
+          : paymentStatusRaw === "pending"
+            ? "pending"
+            : paymentStatusRaw === "failed"
+              ? "failed"
+              : paymentStatusRaw === "refunded"
+                ? "refunded"
+                : bookingStatusRaw === "paid"
+                  ? "completed"
+                  : bookingStatusRaw === "confirmed"
+                    ? "pending"
+                    : null;
+
+      if (booking && derivedPaymentStatus) {
+        const amount = Number(booking.final_price ?? booking.total_price ?? 0);
+        const { rows: existing } = await client.queryObject<{ id: number }>(
+          "select id from public.payments where booking_id = $1 limit 1",
+          [bookingId],
+        );
+
+        if (existing[0]?.id) {
+          await client.queryObject(
+            `
+              update public.payments
+              set
+                amount = $2,
+                currency = $3,
+                status = $4,
+                payment_method = $5,
+                transaction_id = $6,
+                transaction_date = now(),
+                updated_at = now()
+              where id = $1
+            `,
+            [
+              existing[0].id,
+              amount,
+              booking.currency ?? "THB",
+              derivedPaymentStatus,
+              body.paymentMethod ?? body.payment_method ?? null,
+              body.transactionId ?? body.transaction_id ?? null,
+            ],
+          );
+        } else {
+          await client.queryObject(
+            `
+              insert into public.payments (
+                booking_id,
+                venue_id,
+                user_id,
+                amount,
+                currency,
+                status,
+                payment_method,
+                transaction_id
+              )
+              values ($1,$2,$3,$4,$5,$6,$7,$8)
+            `,
+            [
+              booking.id,
+              booking.venue_id,
+              booking.user_id ?? null,
+              amount,
+              booking.currency ?? "THB",
+              derivedPaymentStatus,
+              body.paymentMethod ?? body.payment_method ?? null,
+              body.transactionId ?? body.transaction_id ?? null,
+            ],
+          );
+        }
+      }
+
+      return jsonResponse(booking);
     }
 
     if (req.method === "PUT" && pathname.startsWith("/api/courts/")) {
@@ -806,12 +931,12 @@ serve(async (req) => {
       }>(
         `
           select
-            coalesce(sum(case when upper(p.status) = 'COMPLETED' then p.amount::numeric else 0 end), 0) as completed_amount,
-            count(*) filter (where upper(p.status) = 'COMPLETED') as completed_count,
-            coalesce(sum(case when upper(p.status) = 'PENDING' then p.amount::numeric else 0 end), 0) as pending_amount,
-            count(*) filter (where upper(p.status) = 'PENDING') as pending_count,
-            coalesce(sum(case when upper(p.status) = 'REFUNDED' then p.amount::numeric else 0 end), 0) as refunded_amount,
-            count(*) filter (where upper(p.status) = 'REFUNDED') as refunded_count,
+            coalesce(sum(case when p.status = 'completed' then p.amount::numeric else 0 end), 0) as completed_amount,
+            count(*) filter (where p.status = 'completed') as completed_count,
+            coalesce(sum(case when p.status = 'pending' then p.amount::numeric else 0 end), 0) as pending_amount,
+            count(*) filter (where p.status = 'pending') as pending_count,
+            coalesce(sum(case when p.status = 'refunded' then p.amount::numeric else 0 end), 0) as refunded_amount,
+            count(*) filter (where p.status = 'refunded') as refunded_count,
             count(*) as total_count,
             (
               select coalesce(sum(b.total_price::numeric), 0)

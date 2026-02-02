@@ -1,7 +1,34 @@
 import { z } from "zod";
 
-export const venueTypeEnum = z.enum(["TENNIS", "PADEL", "BADMINTON", "MULTI_SPORT"]);
-export const sportTypeEnum = z.enum(["TENNIS", "PADEL", "BADMINTON"]);
+export const venueTypeEnum = z.enum([
+  "TENNIS",
+  "PADEL",
+  "BADMINTON",
+  "PICKLEBALL",
+  "BASKETBALL",
+  "FOOTBALL",
+  "FUTSAL",
+  "GYM",
+  "BOULDERING",
+  "VOLLEYBALL",
+  "BOWLING",
+  "SQUASH",
+  "MULTI_SPORT",
+]);
+export const sportTypeEnum = z.enum([
+  "TENNIS",
+  "PADEL",
+  "BADMINTON",
+  "PICKLEBALL",
+  "BASKETBALL",
+  "FOOTBALL",
+  "FUTSAL",
+  "GYM",
+  "BOULDERING",
+  "VOLLEYBALL",
+  "BOWLING",
+  "SQUASH",
+]);
 export const environmentEnum = z.enum(["INDOOR", "OUTDOOR", "COVERED"]);
 export const venueStatusEnum = z.enum(["DRAFT", "SUBMITTED"]);
 export const photoTypeEnum = z.enum(["COVER", "ENTRANCE", "FACILITY", "COURT"]);

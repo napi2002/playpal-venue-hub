@@ -21,6 +21,9 @@ export const useVenue = () => {
       const data = await apiFetch("/api/venue");
       return data ?? null;
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const updateVenue = useMutation({

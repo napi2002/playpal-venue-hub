@@ -34,16 +34,19 @@ export const usePayments = () => {
     queryKey: ["payments", session?.user?.id],
     enabled: !!session?.user?.id,
     queryFn: async () => {
-      const response = (await apiFetch("/payments?page=1&pageSize=200")) as {
+      const response = (await apiFetch("/api/payments?page=1&pageSize=200")) as {
         data?: Payment[];
       };
       return response.data ?? [];
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const updatePayment = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<Payment> }) => {
-      await apiFetch(`/payments/${id}`, {
+      await apiFetch(`/api/payments/${id}`, {
         method: "PUT",
         body: JSON.stringify(updates),
       });
@@ -59,7 +62,7 @@ export const usePayments = () => {
 
   const refundPayment = useMutation({
     mutationFn: async ({ id }: { id: string }) => {
-      await apiFetch(`/payments/${id}`, {
+      await apiFetch(`/api/payments/${id}`, {
         method: "PUT",
         body: JSON.stringify({
           status: "refunded",

@@ -26,7 +26,6 @@ import { AddBookingDialog } from "@/components/AddBookingDialog";
 import { useCourts } from "@/hooks/useCourts";
 import { useRecurringBookings } from "@/hooks/useRecurringBookings";
 import { useVenue } from "@/hooks/useVenue";
-import { apiFetch } from "@/lib/apiClient";
 import { addDays, addMinutes, addWeeks, format, startOfDay, startOfWeek } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { BookingEvent, BookingStatus } from "@/types/availability";
@@ -40,6 +39,7 @@ const Availability = () => {
   const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
   const [bookingEvents, setBookingEvents] = useState<BookingEvent[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<BookingEvent | null>(null);
   const { courts } = useCourts();
   const { recurringBookings, isLoading: isRecurringLoading } = useRecurringBookings();
   const { venue } = useVenue();
@@ -380,6 +380,15 @@ const Availability = () => {
     return `${statusLabel}${nameLabel}`;
   };
 
+  const formatEventDateTime = (event: BookingEvent) => {
+    const start = new Date(event.start);
+    const end = new Date(event.end);
+    return {
+      date: format(start, "EEE, MMM d, yyyy"),
+      time: `${format(start, "HH:mm")} - ${format(end, "HH:mm")}`,
+    };
+  };
+
   const formatWeekTitle = () => {
     const end = addDays(weekStart, 6);
     return `${format(weekStart, "MMM dd")} - ${format(end, "MMM dd")}`;
@@ -677,11 +686,20 @@ const Availability = () => {
                                 key={`${event.id}-${day.toISOString()}`}
                                 className={`booking-event ${className}`}
                                 style={{ top, height }}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelectedEvent(event)}
+                                onKeyDown={(eventKey) => {
+                                  if (eventKey.key === "Enter" || eventKey.key === " ") {
+                                    eventKey.preventDefault();
+                                    setSelectedEvent(event);
+                                  }
+                                }}
                               >
-                                <div className="text-xs font-medium">
+                                <div className="text-xs font-medium truncate">
                                   {bookingLabel(event, viewMode)}
                                 </div>
-                                <div className="text-[11px] opacity-80">
+                                <div className="text-[11px] opacity-80 truncate">
                                   {formatTimeLabel(slice.sliceStart)} - {formatTimeLabel(slice.sliceEnd)}
                                 </div>
                               </div>
@@ -870,6 +888,45 @@ const Availability = () => {
               Create booking
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedEvent} onOpenChange={() => setSelectedEvent(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Booking details</DialogTitle>
+          </DialogHeader>
+          {selectedEvent && (() => {
+            const { date, time } = formatEventDateTime(selectedEvent);
+            return (
+              <div className="space-y-3 text-sm">
+                <div>
+                  <div className="text-muted-foreground">Event</div>
+                  <div className="font-medium">
+                    {selectedEvent.eventName || "Booking"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Court</div>
+                  <div className="font-medium">{selectedEvent.courtName}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Date</div>
+                  <div className="font-medium">{date}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Time</div>
+                  <div className="font-medium">{time}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Status</div>
+                  <div className="font-medium">
+                    {selectedEvent.status === "PAID" ? "Paid" : "Pending"}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </DashboardLayout>

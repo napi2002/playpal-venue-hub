@@ -13,6 +13,9 @@ export const useCourts = () => {
       const data = await apiFetch(`/api/venues/${venue?.id}/courts`);
       return Array.isArray(data) ? data : [];
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   return {

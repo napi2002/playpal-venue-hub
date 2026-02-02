@@ -120,7 +120,7 @@ const Payments = () => {
 
   const fetchSummary = async () => {
     try {
-      const data = await apiFetch(`/payments/summary?${queryParams.toString()}`);
+      const data = await apiFetch(`/api/payments/summary?${queryParams.toString()}`);
       setSummary(data as SummaryResponse);
     } catch (error) {
       toast({
@@ -135,7 +135,7 @@ const Payments = () => {
     try {
       setIsLoading(true);
       setErrorMessage(null);
-      const response = (await apiFetch(`/payments?${queryParams.toString()}`)) as
+      const response = (await apiFetch(`/api/payments?${queryParams.toString()}`)) as
         | PaymentsResponse
         | { data: PaymentRecord[]; total: number }
         | { items: PaymentRecord[]; total: number };
@@ -155,7 +155,7 @@ const Payments = () => {
       setPendingLoading(true);
       setPendingError(null);
       const response = (await apiFetch(
-        `/payments/pending?${pendingQueryParams.toString()}`,
+        `/api/payments/pending?${pendingQueryParams.toString()}`,
       )) as PendingBookingsResponse;
       setPendingBookings(response.data ?? []);
       setPendingTotal(response.total ?? 0);
@@ -199,7 +199,7 @@ const Payments = () => {
     try {
       const token = session?.access_token;
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || "http://localhost:3001"}/payments/export?${queryParams.toString()}`,
+        `${import.meta.env.VITE_API_URL || "http://localhost:3001"}/api/payments/export?${queryParams.toString()}`,
         {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         },

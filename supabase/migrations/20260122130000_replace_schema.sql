@@ -130,6 +130,9 @@ create table public.players (
   updated_at timestamptz not null default now()
 );
 
+create unique index players_venue_email_unique
+  on public.players (venue_id, email);
+
 create table public.membership_types (
   id integer primary key generated always as identity,
   venue_id integer references public.venues(id) on delete cascade,

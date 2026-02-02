@@ -23,6 +23,9 @@ export const useBookings = () => {
       const data = await apiFetch(`/api/venues/${venue?.id}/bookings/list`);
       return Array.isArray(data) ? data : [];
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const addBooking = useMutation({
