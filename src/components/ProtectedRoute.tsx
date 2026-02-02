@@ -35,12 +35,9 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
           setHasVenue(false);
           setRequiresOnboarding(!pendingSubmit);
         } else {
-          const venueStatus = data.status ?? data?.venue?.status;
           setHasVenue(true);
-          setRequiresOnboarding(venueStatus !== "SUBMITTED");
-          if (venueStatus === "SUBMITTED") {
-            localStorage.removeItem("playpal-onboarding-submitted");
-          }
+          setRequiresOnboarding(false);
+          localStorage.removeItem("playpal-onboarding-submitted");
         }
       } catch {
         if (!isMounted) return;

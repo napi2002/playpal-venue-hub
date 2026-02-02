@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,8 +38,6 @@ const Availability = () => {
   const [viewMode, setViewMode] = useState<"week" | "day">("week");
   const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
   const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
-  const [bookingEvents, setBookingEvents] = useState<BookingEvent[]>([]);
-  const [loadingBookings, setLoadingBookings] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<BookingEvent | null>(null);
   const { courts } = useCourts();
   const { recurringBookings, isLoading: isRecurringLoading } = useRecurringBookings();
@@ -243,9 +242,38 @@ const Availability = () => {
     });
   }, [courts, recurringBookings, selectedCourt, visibleDays]);
 
+  const bookingsQuery = useQuery({
+    queryKey: [
+      "availability-bookings",
+      venue?.id,
+      rangeStart.toISOString(),
+      rangeEnd.toISOString(),
+      selectedCourt,
+    ],
+    enabled: !!venue?.id,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        start: rangeStart.toISOString(),
+        end: rangeEnd.toISOString(),
+      });
+      if (selectedCourt !== "all") {
+        params.set("courtId", selectedCourt);
+      }
+      const data = await apiFetch(`/api/venues/${venue?.id}/bookings?${params.toString()}`);
+      return Array.isArray(data) ? (data as BookingEvent[]) : [];
+    },
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+  const bookingEventsData = bookingsQuery.data ?? [];
+  const loadingBookingsData = bookingsQuery.isFetching;
+  const refetchBookings = bookingsQuery.refetch;
+
   const mergedEvents = useMemo(
-    () => [...bookingEvents, ...recurringEvents],
-    [bookingEvents, recurringEvents],
+    () => [...bookingEventsData, ...recurringEvents],
+    [bookingEventsData, recurringEvents],
   );
 
   const eventsWithDates = useMemo(
@@ -257,40 +285,6 @@ const Availability = () => {
       })),
     [mergedEvents],
   );
-
-  const fetchBookings = useCallback(async () => {
-    if (!venue?.id) return;
-    setLoadingBookings(true);
-    try {
-      const params = new URLSearchParams({
-        start: rangeStart.toISOString(),
-        end: rangeEnd.toISOString(),
-      });
-      if (selectedCourt !== "all") {
-        params.set("courtId", selectedCourt);
-      }
-      const data = await apiFetch(`/api/venues/${venue.id}/bookings?${params.toString()}`);
-      setBookingEvents(Array.isArray(data) ? data : []);
-    } catch (error) {
-      toast({
-        title: "Failed to load bookings",
-        description: error instanceof Error ? error.message : "Please try again",
-        variant: "destructive",
-      });
-    } finally {
-      setLoadingBookings(false);
-    }
-  }, [rangeEnd, rangeStart, selectedCourt, toast, venue?.id]);
-
-  useEffect(() => {
-    fetchBookings();
-  }, [fetchBookings]);
-
-  useEffect(() => {
-    if (!bookingDialogOpen) {
-      fetchBookings();
-    }
-  }, [bookingDialogOpen, fetchBookings]);
 
   const formatDayLabel = (date: Date) =>
     new Intl.DateTimeFormat("en-US", {
@@ -493,7 +487,7 @@ const Availability = () => {
       sport: "",
       eventName: "",
     });
-    fetchBookings();
+    refetchBookings();
   };
 
   return (
@@ -643,7 +637,7 @@ const Availability = () => {
                             <div className="text-xs text-muted-foreground">Closed</div>
                           )}
                         </div>
-                        {(loadingBookings || isRecurringLoading) && (
+                        {(loadingBookingsData || isRecurringLoading) && (
                           <span className="text-xs text-muted-foreground">Loading...</span>
                         )}
                       </div>

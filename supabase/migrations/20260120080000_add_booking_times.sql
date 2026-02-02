@@ -6,15 +6,16 @@ ALTER TABLE public.bookings
 -- Backfill using existing date/time/duration fields (assume Asia/Bangkok local time).
 UPDATE public.bookings
 SET
-  start_at = COALESCE(
-    start_at,
+  slot_start = COALESCE(
+    slot_start,
     (date + time) AT TIME ZONE 'Asia/Bangkok'
   ),
-  end_at = COALESCE(
-    end_at,
-    COALESCE(start_at, (date + time) AT TIME ZONE 'Asia/Bangkok') + make_interval(mins => duration)
+  slot_end = COALESCE(
+    slot_end,
+    COALESCE(slot_start, (date + time) AT TIME ZONE 'Asia/Bangkok')
+      + make_interval(mins => COALESCE(duration_minutes, 60))
   )
-WHERE start_at IS NULL OR end_at IS NULL;
+WHERE slot_start IS NULL OR slot_end IS NULL;
 
 CREATE INDEX IF NOT EXISTS bookings_venue_time_idx
   ON public.bookings (venue_id, start_at, end_at);

@@ -1,3 +1,7 @@
--- Remove automatic venue provisioning on auth signup.
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-DROP FUNCTION IF EXISTS public.handle_new_user();
+-- Legacy migration superseded by 20260122130000_replace_schema.sql.
+-- Kept as a no-op to avoid conflicts with the current schema.
+do $$
+begin
+  raise notice 'Skipping legacy migration (schema already replaced).';
+end
+$$;

@@ -1,2 +1,7 @@
-ALTER TABLE public.venues
-ADD COLUMN IF NOT EXISTS tax_information TEXT;
+-- Legacy migration superseded by 20260122130000_replace_schema.sql.
+-- Kept as a no-op to avoid conflicts with the current schema.
+do $$
+begin
+  raise notice 'Skipping legacy migration (schema already replaced).';
+end
+$$;
