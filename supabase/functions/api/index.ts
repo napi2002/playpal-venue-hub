@@ -107,7 +107,7 @@ serve(async (req) => {
 
   const url = new URL(req.url);
   let pathname = url.pathname.replace(/^\/functions\/v1/, "");
-  if (pathname.startsWith("/api/payments")) {
+  if (pathname.startsWith("/api/payments") || pathname.startsWith("/api/crm")) {
     pathname = pathname.replace("/api", "");
   }
   const user = await getUser(req);
@@ -1249,6 +1249,7 @@ serve(async (req) => {
       const payload = await parseJsonBody(req);
       if (!payload?.name?.trim()) return jsonResponse({ error: "Name is required" }, 400);
 
+      const status = payload.status ? String(payload.status).toLowerCase() : null;
       const { rows } = await client.queryObject(
         `
           insert into public.membership_types (
@@ -1265,7 +1266,7 @@ serve(async (req) => {
             cancellation_window_hours,
             no_show_forgiveness
           ) values (
-            $1, $2, $3, $4, coalesce($5, 'active'),
+            $1, $2, $3, $4, coalesce($5::public.membership_type_status, 'active'::public.membership_type_status),
             $6, $7, $8, coalesce($9, false), coalesce($10, true), $11, coalesce($12, false)
           )
           returning *
@@ -1275,7 +1276,7 @@ serve(async (req) => {
           payload.name.trim(),
           payload.description_public ?? null,
           payload.description_internal ?? null,
-          payload.status ?? null,
+          status,
           payload.fixed_hourly_rate ?? null,
           payload.percent_discount ?? null,
           payload.early_booking_hours ?? null,
@@ -1293,6 +1294,7 @@ serve(async (req) => {
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
       const membershipId = pathname.split("/")[3];
       const payload = await parseJsonBody(req);
+      const status = payload.status ? String(payload.status).toLowerCase() : null;
       const { rows } = await client.queryObject(
         `
           update public.membership_types
@@ -1300,7 +1302,7 @@ serve(async (req) => {
             name = coalesce($3, name),
             description_public = $4,
             description_internal = $5,
-            status = coalesce($6, status),
+            status = coalesce($6::public.membership_type_status, status),
             fixed_hourly_rate = $7,
             percent_discount = $8,
             early_booking_hours = $9,
@@ -1318,7 +1320,7 @@ serve(async (req) => {
           payload.name?.trim() ?? null,
           payload.description_public ?? null,
           payload.description_internal ?? null,
-          payload.status ?? null,
+          status,
           payload.fixed_hourly_rate ?? null,
           payload.percent_discount ?? null,
           payload.early_booking_hours ?? null,
@@ -1494,6 +1496,7 @@ serve(async (req) => {
         return jsonResponse({ ok: true });
       }
 
+      const status = payload.status ? String(payload.status).toLowerCase() : null;
       const { rows } = await client.queryObject(
         `
           insert into public.player_memberships (
@@ -1503,14 +1506,18 @@ serve(async (req) => {
             status,
             start_date,
             end_date
-          ) values ($1, $2, $3, coalesce($4, 'active'), $5, $6)
+          ) values (
+            $1, $2, $3,
+            coalesce($4::public.membership_status, 'active'::public.membership_status),
+            $5, $6
+          )
           returning *
         `,
         [
           venueId,
           playerId,
           payload.membershipTypeId,
-          payload.status ?? "active",
+          status,
           payload.startDate ?? null,
           payload.endDate ?? null,
         ],

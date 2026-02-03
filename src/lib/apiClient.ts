@@ -30,7 +30,10 @@ export const apiFetch = async (path: string, options: RequestInit = {}) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  const shouldPrefixApi = API_BASE.includes("/functions/v1") && path.startsWith("/crm");
+  const normalizedPath = shouldPrefixApi ? `/api${path}` : path;
+
+  const response = await fetch(`${API_BASE}${normalizedPath}`, {
     ...options,
     headers,
     signal: controller.signal,

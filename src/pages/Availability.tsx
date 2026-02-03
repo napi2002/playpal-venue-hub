@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,7 @@ const Availability = () => {
   const { recurringBookings, isLoading: isRecurringLoading } = useRecurringBookings();
   const { venue } = useVenue();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [overrideForm, setOverrideForm] = useState({
     date: new Date().toISOString().split("T")[0],
     startTime: "09:00",
@@ -242,14 +243,16 @@ const Availability = () => {
     });
   }, [courts, recurringBookings, selectedCourt, visibleDays]);
 
+  const bookingsQueryKey = [
+    "availability-bookings",
+    venue?.id,
+    rangeStart.toISOString(),
+    rangeEnd.toISOString(),
+    selectedCourt,
+  ];
+
   const bookingsQuery = useQuery({
-    queryKey: [
-      "availability-bookings",
-      venue?.id,
-      rangeStart.toISOString(),
-      rangeEnd.toISOString(),
-      selectedCourt,
-    ],
+    queryKey: bookingsQueryKey,
     enabled: !!venue?.id,
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -457,7 +460,7 @@ const Availability = () => {
       return;
     }
 
-    await apiFetch(`/api/venues/${selected.venue_id}/bookings`, {
+    const createdBooking = await apiFetch(`/api/venues/${selected.venue_id}/bookings`, {
       method: "POST",
       body: JSON.stringify({
         venueId: selected.venue_id,
@@ -478,6 +481,29 @@ const Availability = () => {
     });
 
     toast({ title: "Booking created" });
+    if (createdBooking?.id) {
+      const optimisticEvent: BookingEvent = {
+        id: String(createdBooking.id),
+        courtId: overrideForm.courtId,
+        courtName: selected.name,
+        start: new Date(startAt).toISOString(),
+        end: new Date(endAt).toISOString(),
+        eventName: overrideForm.eventName,
+        status: "PAID",
+      };
+      queryClient.setQueryData<BookingEvent[]>(
+        bookingsQueryKey,
+        (current = []) => {
+          if (current.some((event) => event.id === optimisticEvent.id)) {
+            return current;
+          }
+          return [...current, optimisticEvent].sort(
+            (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
+          );
+        },
+      );
+    }
+    queryClient.invalidateQueries({ queryKey: ["availability-bookings"] });
     setOverrideDialogOpen(false);
     setOverrideForm({
       date: overrideForm.date,

@@ -53,6 +53,7 @@ export const useBookings = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bookings"] });
+      queryClient.invalidateQueries({ queryKey: ["availability-bookings"] });
       toast({
         title: "Booking created",
         description: "The booking has been added successfully",

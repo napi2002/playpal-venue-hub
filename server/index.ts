@@ -926,6 +926,7 @@ app.post("/crm/memberships", requireUser, async (req, res) => {
     return;
   }
 
+  const status = payload.status ? String(payload.status).toLowerCase() : null;
   const { rows } = await pool.query(
     `
       insert into public.membership_types (
@@ -942,7 +943,7 @@ app.post("/crm/memberships", requireUser, async (req, res) => {
         cancellation_window_hours,
         no_show_forgiveness
       ) values (
-        $1, $2, $3, $4, coalesce($5, 'active'),
+        $1, $2, $3, $4, coalesce($5::public.membership_type_status, 'active'::public.membership_type_status),
         $6, $7, $8, coalesce($9, false), coalesce($10, true), $11, coalesce($12, false)
       )
       returning *
@@ -952,7 +953,7 @@ app.post("/crm/memberships", requireUser, async (req, res) => {
       payload.name.trim(),
       payload.description_public ?? null,
       payload.description_internal ?? null,
-      payload.status ?? null,
+      status,
       payload.fixed_hourly_rate ?? null,
       payload.percent_discount ?? null,
       payload.early_booking_hours ?? null,
@@ -989,6 +990,7 @@ app.put("/crm/memberships/:membershipId", requireUser, async (req, res) => {
     no_show_forgiveness?: boolean | null;
   };
 
+  const status = payload.status ? String(payload.status).toLowerCase() : null;
   const { rows } = await pool.query(
     `
       update public.membership_types
@@ -996,7 +998,7 @@ app.put("/crm/memberships/:membershipId", requireUser, async (req, res) => {
         name = coalesce($3, name),
         description_public = $4,
         description_internal = $5,
-        status = coalesce($6, status),
+        status = coalesce($6::public.membership_type_status, status),
         fixed_hourly_rate = $7,
         percent_discount = $8,
         early_booking_hours = $9,
@@ -1014,7 +1016,7 @@ app.put("/crm/memberships/:membershipId", requireUser, async (req, res) => {
       payload.name?.trim() ?? null,
       payload.description_public ?? null,
       payload.description_internal ?? null,
-      payload.status ?? null,
+      status,
       payload.fixed_hourly_rate ?? null,
       payload.percent_discount ?? null,
       payload.early_booking_hours ?? null,
@@ -1235,6 +1237,7 @@ app.post("/crm/players/:playerId/membership", requireUser, async (req, res) => {
     return;
   }
 
+  const status = payload.status ? String(payload.status).toLowerCase() : null;
   const { rows } = await pool.query(
     `
       insert into public.player_memberships (
@@ -1244,14 +1247,18 @@ app.post("/crm/players/:playerId/membership", requireUser, async (req, res) => {
         status,
         start_date,
         end_date
-      ) values ($1, $2, $3, coalesce($4, 'active'), $5, $6)
+      ) values (
+        $1, $2, $3,
+        coalesce($4::public.membership_status, 'active'::public.membership_status),
+        $5, $6
+      )
       returning *
     `,
     [
       venueId,
       playerId,
       payload.membershipTypeId,
-      payload.status ?? "active",
+      status,
       payload.startDate ?? null,
       payload.endDate ?? null,
     ],
