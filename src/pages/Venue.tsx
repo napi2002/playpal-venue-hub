@@ -45,7 +45,7 @@ const Venue = () => {
   const { photos, isLoading: isPhotosLoading } = usePhotos();
   const [isEditing, setIsEditing] = useState(false);
   const [editingCourt, setEditingCourt] = useState<null | {
-    id: string;
+    id: string | null;
     name: string;
     sport: string | null;
     sport_type: string | null;
@@ -122,6 +122,17 @@ const Venue = () => {
     });
     return Array.from(unique);
   }, [courts, selectedSports]);
+
+  const resetCourtForm = () => {
+    setCourtForm({
+      name: "",
+      sport: "",
+      status: "active",
+      environment: "",
+      weekdayPrice: "",
+      weekendPrice: "",
+    });
+  };
 
   const coverPhoto = useMemo(
     () => photos.find((photo) => photo.type === "COVER"),
@@ -228,6 +239,22 @@ const Venue = () => {
     });
   };
 
+  const handleAddCourt = () => {
+    setEditingCourt({
+      id: null,
+      name: "",
+      sport: null,
+      sport_type: null,
+      status: "active",
+      environment: null,
+      weekday_price_per_hour_thb: null,
+      weekend_price_per_hour_thb: null,
+      off_peak_price: null,
+      peak_price: null,
+    });
+    resetCourtForm();
+  };
+
   const handleSaveCourt = async () => {
     if (!editingCourt) return;
     if (!courtForm.name.trim()) {
@@ -263,17 +290,29 @@ const Venue = () => {
           : null,
       };
 
-      await apiFetch(`/api/courts/${editingCourt.id}`, {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      });
+      if (editingCourt.id) {
+        await apiFetch(`/api/courts/${editingCourt.id}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        toast({ title: "Court updated" });
+      } else {
+        if (!venue?.id) {
+          throw new Error("Venue not found. Save your venue profile first.");
+        }
+        await apiFetch(`/api/venues/${venue.id}/courts/create`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        toast({ title: "Court added" });
+      }
 
-      toast({ title: "Court updated" });
       setEditingCourt(null);
+      resetCourtForm();
       queryClient.invalidateQueries({ queryKey: ["courts"] });
     } catch (error) {
       toast({
-        title: "Failed to update court",
+        title: "Failed to save court",
         description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive",
       });
@@ -362,6 +401,7 @@ const Venue = () => {
   };
 
   const isReadOnly = !isEditing || isLoading;
+  const isCreatingCourt = Boolean(editingCourt && editingCourt.id === null);
 
   return (
     <DashboardLayout>
@@ -372,7 +412,7 @@ const Venue = () => {
             <h1 className="text-3xl font-semibold tracking-tight">Venue & Courts</h1>
             <p className="text-muted-foreground mt-1">Manage your venue profile and courts</p>
           </div>
-          <Button variant="cta">
+          <Button variant="cta" onClick={handleAddCourt}>
             <Plus className="mr-2 h-4 w-4" />
             Add court
           </Button>
@@ -842,10 +882,18 @@ const Venue = () => {
         </Tabs>
       </div>
 
-      <Dialog open={Boolean(editingCourt)} onOpenChange={(open) => !open && setEditingCourt(null)}>
+      <Dialog
+        open={Boolean(editingCourt)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingCourt(null);
+            resetCourtForm();
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit court</DialogTitle>
+            <DialogTitle>{isCreatingCourt ? "Add court" : "Edit court"}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="space-y-2">
@@ -929,7 +977,13 @@ const Venue = () => {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingCourt(null)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditingCourt(null);
+                resetCourtForm();
+              }}
+            >
               Cancel
             </Button>
             <Button variant="cta" onClick={handleSaveCourt} disabled={isSavingCourt}>

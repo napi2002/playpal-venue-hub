@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuthSession } from "@/contexts/AuthContext";
 import { apiFetch } from "@/lib/apiClient";
+import { supabase } from "@/integrations/supabase/client";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -13,6 +14,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   const [requiresOnboarding, setRequiresOnboarding] = useState<boolean | null>(null);
   const [checkingVenue, setCheckingVenue] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     let isMounted = true;
@@ -39,8 +41,13 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
           setRequiresOnboarding(false);
           localStorage.removeItem("playpal-onboarding-submitted");
         }
-      } catch {
+      } catch (error) {
         if (!isMounted) return;
+        if (error instanceof Error && error.message.includes("Admin access required")) {
+          await supabase.auth.signOut();
+          navigate("/");
+          return;
+        }
         setHasVenue(false);
         setRequiresOnboarding(true);
       } finally {

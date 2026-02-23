@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuthSession } from "@/contexts/AuthContext";
+import { apiFetch } from "@/lib/apiClient";
 
 export const useAuth = () => {
   const { user, session, loading } = useAuthSession();
@@ -18,6 +19,14 @@ export const useAuth = () => {
       });
 
       if (error) throw error;
+
+      try {
+        await apiFetch("/api/venue");
+      } catch (adminError) {
+        await supabase.auth.signOut();
+        toast.error("Admin access required");
+        return { data: null, error: adminError };
+      }
 
       toast.success("Signed in successfully");
       navigate("/dashboard");

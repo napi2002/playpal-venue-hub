@@ -4,7 +4,7 @@ import multer from "multer";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { pool } from "./db";
-import { requireUser, type AuthedRequest } from "./auth";
+import { requireAdmin, type AuthedRequest } from "./auth";
 import {
   courtsSchema,
   photoTypeEnum,
@@ -39,7 +39,7 @@ const getPrimaryVenueId = async (userId: string) => {
   return rows[0]?.venue_id ?? null;
 };
 
-app.post("/api/upload", requireUser, upload.single("file"), async (req, res) => {
+app.post("/api/upload", requireAdmin, upload.single("file"), async (req, res) => {
   const file = req.file;
   if (!file) {
     res.status(400).json({ error: "File is required" });
@@ -72,7 +72,19 @@ app.get("/api/uploads/:id", (req, res) => {
   res.send(entry.buffer);
 });
 
-app.post("/api/venues/draft", requireUser, async (req, res) => {
+app.get("/api/venue", requireAdmin, async (req, res) => {
+  const authedReq = req as AuthedRequest;
+  const venueId = await getPrimaryVenueId(authedReq.user.id);
+  if (!venueId) {
+    res.json(null);
+    return;
+  }
+
+  const { rows } = await pool.query("select * from public.venues where id = $1", [venueId]);
+  res.json(rows[0] ?? null);
+});
+
+app.post("/api/venues/draft", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const profileDraftSchema = venueProfileSchema.partial();
   const parsed = profileDraftSchema.safeParse(authedReq.body.profile ?? {});
@@ -186,7 +198,7 @@ app.post("/api/venues/draft", requireUser, async (req, res) => {
   }
 });
 
-app.put("/api/venues/:venueId", requireUser, async (req, res) => {
+app.put("/api/venues/:venueId", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const bodySchema = z.object({
     profile: venueProfileSchema,
@@ -246,7 +258,73 @@ app.put("/api/venues/:venueId", requireUser, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/venues/:venueId/courts", requireUser, async (req, res) => {
+app.get("/api/venues/:venueId/courts", requireAdmin, async (req, res) => {
+  const authedReq = req as AuthedRequest;
+  const venueId = authedReq.params.venueId;
+  if (!(await ensureVenueAccess(authedReq.user.id, venueId))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const { rows } = await pool.query(
+    "select * from public.courts where venue_id = $1 order by created_at asc",
+    [venueId],
+  );
+  res.json(rows);
+});
+
+app.post("/api/venues/:venueId/courts/create", requireAdmin, async (req, res) => {
+  const authedReq = req as AuthedRequest;
+  const venueId = authedReq.params.venueId;
+  if (!(await ensureVenueAccess(authedReq.user.id, venueId))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const schema = z.object({
+    name: z.string().min(1),
+    sport: z.string().nullable().optional(),
+    sport_type: z.string().nullable().optional(),
+    status: z.string().nullable().optional(),
+    environment: z.string().nullable().optional(),
+    weekday_price_per_hour_thb: z.number().nullable().optional(),
+    weekend_price_per_hour_thb: z.number().nullable().optional(),
+  });
+  const parsed = schema.safeParse(authedReq.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const payload = parsed.data;
+  const { rows } = await pool.query<{ id: string }>(
+    `insert into public.courts (
+        venue_id,
+        name,
+        sport,
+        sport_type,
+        status,
+        environment,
+        weekday_price_per_hour_thb,
+        weekend_price_per_hour_thb
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8)
+      returning id`,
+    [
+      venueId,
+      payload.name,
+      payload.sport ?? null,
+      payload.sport_type ?? null,
+      payload.status ?? "active",
+      payload.environment ?? null,
+      payload.weekday_price_per_hour_thb ?? null,
+      payload.weekend_price_per_hour_thb ?? null,
+    ],
+  );
+
+  res.json({ id: rows[0]?.id ?? null });
+});
+
+app.post("/api/venues/:venueId/courts", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const schema = z.object({ courts: courtsSchema });
   const parsed = schema.safeParse(authedReq.body);
@@ -310,7 +388,71 @@ app.post("/api/venues/:venueId/courts", requireUser, async (req, res) => {
   }
 });
 
-app.post("/api/venues/:venueId/photos", requireUser, async (req, res) => {
+app.put("/api/courts/:courtId", requireAdmin, async (req, res) => {
+  const authedReq = req as AuthedRequest;
+  const courtId = authedReq.params.courtId;
+  const schema = z.object({
+    name: z.string().min(1).optional(),
+    sport: z.string().nullable().optional(),
+    sport_type: z.string().nullable().optional(),
+    status: z.string().nullable().optional(),
+    environment: z.string().nullable().optional(),
+    weekday_price_per_hour_thb: z.number().nullable().optional(),
+    weekend_price_per_hour_thb: z.number().nullable().optional(),
+  });
+  const parsed = schema.safeParse(authedReq.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const { rows: courtRows } = await pool.query<{ venue_id: string }>(
+    "select venue_id from public.courts where id = $1",
+    [courtId],
+  );
+  const venueId = courtRows[0]?.venue_id;
+  if (!venueId) {
+    res.status(404).json({ error: "Court not found" });
+    return;
+  }
+
+  if (!(await ensureVenueAccess(authedReq.user.id, String(venueId)))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const updates: string[] = [];
+  const values: Array<string | number | null> = [];
+  const addUpdate = (column: string, value: string | number | null | undefined) => {
+    if (value === undefined) return;
+    values.push(value);
+    updates.push(`${column} = $${values.length}`);
+  };
+
+  addUpdate("name", parsed.data.name);
+  addUpdate("sport", parsed.data.sport);
+  addUpdate("sport_type", parsed.data.sport_type);
+  addUpdate("status", parsed.data.status);
+  addUpdate("environment", parsed.data.environment);
+  addUpdate("weekday_price_per_hour_thb", parsed.data.weekday_price_per_hour_thb);
+  addUpdate("weekend_price_per_hour_thb", parsed.data.weekend_price_per_hour_thb);
+
+  if (!updates.length) {
+    res.status(400).json({ error: "No updates provided" });
+    return;
+  }
+
+  await pool.query(
+    `update public.courts
+     set ${updates.join(", ")}, updated_at = now()
+     where id = $${values.length + 1}`,
+    [...values, courtId],
+  );
+
+  res.json({ ok: true });
+});
+
+app.post("/api/venues/:venueId/photos", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const parsed = photosPayloadSchema.safeParse(authedReq.body);
   if (!parsed.success) {
@@ -353,7 +495,7 @@ app.post("/api/venues/:venueId/photos", requireUser, async (req, res) => {
   }
 });
 
-app.post("/api/venues/:venueId/submit", requireUser, async (req, res) => {
+app.post("/api/venues/:venueId/submit", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = authedReq.params.venueId;
   if (!(await ensureVenueAccess(authedReq.user.id, venueId))) {
@@ -451,7 +593,7 @@ app.post("/api/venues/:venueId/submit", requireUser, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/venues/:venueId/bookings", requireUser, async (req, res) => {
+app.get("/api/venues/:venueId/bookings", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = authedReq.params.venueId;
   if (!(await ensureVenueAccess(authedReq.user.id, venueId))) {
@@ -524,7 +666,7 @@ app.get("/api/venues/:venueId/bookings", requireUser, async (req, res) => {
   res.json(payload);
 });
 
-app.get("/payments/summary", requireUser, async (req, res) => {
+app.get("/payments/summary", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -607,7 +749,7 @@ app.get("/payments/summary", requireUser, async (req, res) => {
   });
 });
 
-app.get("/payments", requireUser, async (req, res) => {
+app.get("/payments", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -692,7 +834,7 @@ app.get("/payments", requireUser, async (req, res) => {
   });
 });
 
-app.get("/payments/export", requireUser, async (req, res) => {
+app.get("/payments/export", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -777,7 +919,7 @@ app.get("/payments/export", requireUser, async (req, res) => {
   res.send(csvRows.join("\n"));
 });
 
-app.get("/payments/pending", requireUser, async (req, res) => {
+app.get("/payments/pending", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -845,7 +987,7 @@ app.get("/payments/pending", requireUser, async (req, res) => {
   });
 });
 
-app.get("/crm/memberships", requireUser, async (req, res) => {
+app.get("/crm/memberships", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -899,7 +1041,7 @@ app.get("/crm/memberships", requireUser, async (req, res) => {
   res.json(rows);
 });
 
-app.post("/crm/memberships", requireUser, async (req, res) => {
+app.post("/crm/memberships", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -967,7 +1109,7 @@ app.post("/crm/memberships", requireUser, async (req, res) => {
   res.json(rows[0]);
 });
 
-app.put("/crm/memberships/:membershipId", requireUser, async (req, res) => {
+app.put("/crm/memberships/:membershipId", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -1030,7 +1172,7 @@ app.put("/crm/memberships/:membershipId", requireUser, async (req, res) => {
   res.json(rows[0]);
 });
 
-app.get("/crm/players", requireUser, async (req, res) => {
+app.get("/crm/players", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -1128,7 +1270,7 @@ app.get("/crm/players", requireUser, async (req, res) => {
   });
 });
 
-app.post("/crm/players", requireUser, async (req, res) => {
+app.post("/crm/players", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -1166,7 +1308,7 @@ app.post("/crm/players", requireUser, async (req, res) => {
   res.json(rows[0]);
 });
 
-app.put("/crm/players/:playerId", requireUser, async (req, res) => {
+app.put("/crm/players/:playerId", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -1207,7 +1349,7 @@ app.put("/crm/players/:playerId", requireUser, async (req, res) => {
   res.json(rows[0]);
 });
 
-app.post("/crm/players/:playerId/membership", requireUser, async (req, res) => {
+app.post("/crm/players/:playerId/membership", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -1267,7 +1409,7 @@ app.post("/crm/players/:playerId/membership", requireUser, async (req, res) => {
   res.json(rows[0]);
 });
 
-app.post("/crm/players/:playerId/notes", requireUser, async (req, res) => {
+app.post("/crm/players/:playerId/notes", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
@@ -1294,7 +1436,7 @@ app.post("/crm/players/:playerId/notes", requireUser, async (req, res) => {
   res.json(rows[0]);
 });
 
-app.get("/crm/players/:playerId", requireUser, async (req, res) => {
+app.get("/crm/players/:playerId", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
   if (!venueId) {
