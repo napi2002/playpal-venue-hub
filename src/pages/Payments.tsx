@@ -19,10 +19,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Download, Filter, Search } from "lucide-react";
+import { Filter, Search } from "lucide-react";
 import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
-import { useAuthSession } from "@/contexts/AuthContext";
 
 const PAGE_SIZE = 10;
 
@@ -76,7 +75,6 @@ type PendingBookingsResponse = {
 
 const Payments = () => {
   const { toast } = useToast();
-  const { session } = useAuthSession();
   const [statusFilter, setStatusFilter] = useState<"all" | PaymentStatus>("all");
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -195,37 +193,6 @@ const Payments = () => {
     }
   };
 
-  const handleExport = async () => {
-    try {
-      const token = session?.access_token;
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL || "http://localhost:3001"}/api/payments/export?${queryParams.toString()}`,
-        {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      const today = new Date().toISOString().slice(0, 10);
-      a.href = url;
-      a.download = `payments_${today}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      toast({
-        title: "Export failed",
-        description: error instanceof Error ? error.message : "Please try again",
-        variant: "destructive",
-      });
-    }
-  };
-
   const renderSummaryValue = (value?: number) => (value ?? 0).toFixed(2);
 
   return (
@@ -238,10 +205,6 @@ const Payments = () => {
               Track transactions and manage payouts
             </p>
           </div>
-          <Button variant="outline" onClick={handleExport}>
-            <Download className="mr-2 h-4 w-4" />
-            Export
-          </Button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

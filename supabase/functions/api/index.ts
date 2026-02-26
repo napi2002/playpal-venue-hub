@@ -49,22 +49,16 @@ const getUser = async (req: Request) => {
   return data.user;
 };
 
-const ensureAdminUser = async (client: ReturnType<typeof pool.connect>, authUser: { id: string; email?: string | null }) => {
-  const { rows } = await client.queryObject<{ id: number }>(
-    "select id from public.users where auth_id = $1 limit 1",
+const getAdminUserId = async (
+  client: ReturnType<typeof pool.connect>,
+  authUser: { id: string },
+) => {
+  const { rows } = await client.queryObject<{ id: number; role: string }>(
+    "select id, role from public.users where auth_id = $1 limit 1",
     [authUser.id],
   );
-  if (rows[0]?.id) return rows[0].id;
-
-  const { rows: created } = await client.queryObject<{ id: number }>(
-    `
-      insert into public.users (email, role, auth_id)
-      values ($1, 'admin', $2)
-      returning id
-    `,
-    [authUser.email ?? `user-${authUser.id}@local`, authUser.id],
-  );
-  return created[0]?.id;
+  if (!rows[0] || rows[0].role !== "admin") return null;
+  return rows[0].id;
 };
 
 const ensureVenueAccess = async (
@@ -117,7 +111,10 @@ serve(async (req) => {
 
   const client = await pool.connect();
   try {
-    const adminUserId = await ensureAdminUser(client, { id: user.id, email: user.email ?? null });
+    const adminUserId = await getAdminUserId(client, { id: user.id });
+    if (!adminUserId) {
+      return jsonResponse({ error: "Admin access required" }, 403);
+    }
 
     if (req.method === "POST" && pathname === "/api/upload") {
       const form = await req.formData();
@@ -328,6 +325,44 @@ serve(async (req) => {
       }
     }
 
+    if (req.method === "POST" && pathname.endsWith("/courts/create")) {
+      const venueId = parseId(pathname.split("/")[3]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+      const body = await parseJsonBody(req);
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      if (!name) return jsonResponse({ error: "Court name is required" }, 400);
+
+      const { rows } = await client.queryObject<{ id: number }>(
+        `
+          insert into public.courts (
+            venue_id,
+            name,
+            sport_type,
+            sport,
+            status,
+            environment,
+            weekday_price_per_hour_thb,
+            weekend_price_per_hour_thb
+          )
+          values ($1,$2,$3,$4,$5,$6,$7,$8)
+          returning id
+        `,
+        [
+          venueId,
+          name,
+          body.sport_type ?? null,
+          body.sport ?? null,
+          body.status ?? "active",
+          body.environment ?? null,
+          body.weekday_price_per_hour_thb ?? null,
+          body.weekend_price_per_hour_thb ?? null,
+        ],
+      );
+      return jsonResponse({ id: rows[0]?.id ?? null });
+    }
+
     if (req.method === "POST" && pathname.endsWith("/photos")) {
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
@@ -379,6 +414,29 @@ serve(async (req) => {
       const { rows } = await client.queryObject(
         "select * from public.photos where venue_id = $1 order by created_at desc",
         [venueId],
+      );
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "GET" && pathname.endsWith("/recurring-booking-exceptions")) {
+      const venueId = parseId(pathname.split("/")[3]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const start = url.searchParams.get("start");
+      const end = url.searchParams.get("end");
+      if (!start || !end) return jsonResponse({ error: "Start and end are required" }, 400);
+
+      const { rows } = await client.queryObject(
+        `
+          select recurring_booking_id, occurrence_date
+          from public.recurring_booking_exceptions
+          where venue_id = $1
+            and occurrence_date >= $2::date
+            and occurrence_date < $3::date
+        `,
+        [venueId, start, end],
       );
       return jsonResponse(rows);
     }
@@ -869,6 +927,43 @@ serve(async (req) => {
         ],
       );
       return jsonResponse(rows[0]);
+    }
+
+    if (req.method === "POST" && pathname.startsWith("/api/recurring-bookings/") && pathname.endsWith("/cancel-date")) {
+      const recurringId = parseId(pathname.split("/")[3]);
+      if (!recurringId) return jsonResponse({ error: "Recurring booking not found" }, 404);
+      const body = await parseJsonBody(req);
+      const occurrenceDate = typeof body.date === "string" ? body.date : null;
+      if (!occurrenceDate) return jsonResponse({ error: "Date is required" }, 400);
+
+      const { rows: venueRows } = await client.queryObject<{ venue_id: number }>(
+        "select venue_id from public.recurring_bookings where id = $1",
+        [recurringId],
+      );
+      const venueId = venueRows[0]?.venue_id;
+      if (!venueId) return jsonResponse({ error: "Recurring booking not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      try {
+        await client.queryObject(
+          `
+            insert into public.recurring_booking_exceptions (
+              venue_id,
+              recurring_booking_id,
+              occurrence_date
+            ) values ($1,$2,$3::date)
+            on conflict (recurring_booking_id, occurrence_date) do nothing
+          `,
+          [venueId, recurringId, occurrenceDate],
+        );
+        return jsonResponse({ ok: true });
+      } catch (error) {
+        return jsonResponse(
+          { error: error instanceof Error ? error.message : "Failed to cancel occurrence" },
+          500,
+        );
+      }
     }
 
     if (req.method === "DELETE" && pathname.startsWith("/api/recurring-bookings/")) {

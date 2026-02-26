@@ -5,6 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,7 +29,6 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
-  Copy,
   Clock,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -37,8 +46,12 @@ const Availability = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<"week" | "day">("week");
   const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<{ date: string; time: string } | null>(null);
   const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<BookingEvent | null>(null);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<BookingStatus | null>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const { courts } = useCourts();
   const { recurringBookings, isLoading: isRecurringLoading } = useRecurringBookings();
   const { venue } = useVenue();
@@ -69,6 +82,71 @@ const Availability = () => {
   const defaultEndMinutes = 22 * 60;
   const slotHeight = 24;
   const pxPerMinute = slotHeight / slotMinutes;
+
+  const updateBookingStatus = async (status: BookingStatus) => {
+    if (!selectedEvent) return;
+    const statusLower = status.toLowerCase();
+    setIsUpdatingStatus(true);
+    try {
+      if (selectedEvent.recurringId) {
+        if (status === "CANCELLED") {
+          if (!selectedEvent.occurrenceDate) {
+            throw new Error("Missing booking date");
+          }
+          await apiFetch(`/api/recurring-bookings/${selectedEvent.recurringId}/cancel-date`, {
+            method: "POST",
+            body: JSON.stringify({
+              date: selectedEvent.occurrenceDate,
+            }),
+          });
+          queryClient.invalidateQueries({ queryKey: ["recurring_exceptions"] });
+        } else {
+          await apiFetch(`/api/recurring-bookings/${selectedEvent.recurringId}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              status: statusLower,
+            }),
+          });
+          queryClient.invalidateQueries({ queryKey: ["recurring_bookings"] });
+        }
+      } else {
+        const payload: { status: string; paymentStatus?: string } = {
+          status: statusLower,
+        };
+        if (statusLower !== "cancelled") {
+          payload.paymentStatus = statusLower;
+        }
+        await apiFetch(`/api/bookings/${selectedEvent.id}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      }
+      if (status === "CANCELLED") {
+        setSelectedEvent(null);
+      } else {
+        setSelectedEvent({ ...selectedEvent, status });
+      }
+      queryClient.invalidateQueries({ queryKey: ["availability-bookings"] });
+      toast({ title: "Booking status updated" });
+    } catch (error) {
+      toast({
+        title: "Failed to update status",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+
+  const handleStatusChange = (value: BookingStatus) => {
+    if (value === "CANCELLED") {
+      setPendingStatus(value);
+      setCancelDialogOpen(true);
+      return;
+    }
+    updateBookingStatus(value);
+  };
 
   const openingHours = useMemo(() => {
     return venue?.opening_hours as
@@ -168,6 +246,41 @@ const Availability = () => {
     return utcDate.toISOString();
   };
 
+  const formatDateKey = useCallback((value: Date) => {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(value);
+  }, []);
+
+  const rangeStartKey = useMemo(() => formatDateKey(rangeStart), [formatDateKey, rangeStart]);
+  const rangeEndKey = useMemo(() => formatDateKey(rangeEnd), [formatDateKey, rangeEnd]);
+
+  const recurringExceptionsQuery = useQuery({
+    queryKey: ["recurring_exceptions", venue?.id, rangeStartKey, rangeEndKey],
+    enabled: !!venue?.id && Boolean(rangeStartKey) && Boolean(rangeEndKey),
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        start: rangeStartKey,
+        end: rangeEndKey,
+      });
+      const data = await apiFetch(
+        `/api/venues/${venue?.id}/recurring-booking-exceptions?${params.toString()}`,
+      );
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+  const recurringExceptions = (recurringExceptionsQuery.data ?? []) as Array<{
+    recurring_booking_id: number;
+    occurrence_date: string | Date;
+  }>;
+
   const recurringEvents = useMemo(() => {
     if (!recurringBookings.length) return [];
 
@@ -204,6 +317,17 @@ const Availability = () => {
 
     const byCourt = new Map(courts.map((court) => [court.id, court.name]));
 
+    const normalizeExceptionDate = (value: string | Date) => {
+      if (value instanceof Date) return formatDateKey(value);
+      if (value.length >= 10) return value.slice(0, 10);
+      return value;
+    };
+    const exceptionLookup = new Set(
+      recurringExceptions.map(
+        (entry) => `${entry.recurring_booking_id}-${normalizeExceptionDate(entry.occurrence_date)}`,
+      ),
+    );
+
     return recurringBookings.flatMap((recurring) => {
       if (recurring.status === "cancelled") return [];
       if (selectedCourt !== "all" && recurring.court_id !== selectedCourt) return [];
@@ -225,9 +349,13 @@ const Availability = () => {
           new Date(startAt).getTime() + Number(recurring.duration) * 60000,
         ).toISOString();
 
+        if (exceptionLookup.has(`${recurring.id}-${dateKey}`)) return [];
+
         return [
           {
             id: `${recurring.id}-${dateKey}`,
+            recurringId: String(recurring.id),
+            occurrenceDate: dateKey,
             courtId: recurring.court_id,
             courtName: byCourt.get(recurring.court_id) || "Court",
             start: startAt,
@@ -241,7 +369,7 @@ const Availability = () => {
         ];
       });
     });
-  }, [courts, recurringBookings, selectedCourt, visibleDays]);
+  }, [courts, recurringBookings, recurringExceptions, selectedCourt, visibleDays]);
 
   const bookingsQueryKey = [
     "availability-bookings",
@@ -365,6 +493,9 @@ const Availability = () => {
       });
       return;
     }
+    const dateKey = formatDateKey(start);
+    const timeValue = format(start, "HH:mm");
+    setSelectedSlot({ date: dateKey, time: timeValue });
     setBookingDialogOpen(true);
   };
 
@@ -526,15 +657,14 @@ const Availability = () => {
             <p className="text-muted-foreground mt-1">Set and manage court availability schedules</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline">
-              <Copy className="mr-2 h-4 w-4" />
-              Bulk edit
-            </Button>
-            <Button variant="cta">
-              <Plus className="mr-2 h-4 w-4" />
-              Add availability
-            </Button>
-            <Button variant="outline" onClick={() => setBookingDialogOpen(true)}>
+            <Button
+              variant="cta"
+              className="bg-orange-500 text-white hover:bg-orange-600"
+              onClick={() => {
+                setSelectedSlot(null);
+                setBookingDialogOpen(true);
+              }}
+            >
               <Plus className="mr-2 h-4 w-4" />
               Add booking
             </Button>
@@ -818,7 +948,17 @@ const Availability = () => {
         </Tabs>
       </div>
       
-      <AddBookingDialog open={bookingDialogOpen} onOpenChange={setBookingDialogOpen} />
+      <AddBookingDialog
+        open={bookingDialogOpen}
+        onOpenChange={(open) => {
+          setBookingDialogOpen(open);
+          if (!open) {
+            setSelectedSlot(null);
+          }
+        }}
+        initialDate={selectedSlot?.date}
+        initialTime={selectedSlot?.time}
+      />
       <Dialog open={overrideDialogOpen} onOpenChange={setOverrideDialogOpen}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
@@ -940,15 +1080,56 @@ const Availability = () => {
                 </div>
                 <div>
                   <div className="text-muted-foreground">Status</div>
-                  <div className="font-medium">
-                    {selectedEvent.status === "PAID" ? "Paid" : "Pending"}
-                  </div>
+                  <Select
+                    value={selectedEvent.status}
+                    onValueChange={(value) => handleStatusChange(value as BookingStatus)}
+                    disabled={isUpdatingStatus}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="PENDING">Pending</SelectItem>
+                      <SelectItem value="PAID">Paid</SelectItem>
+                      <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             );
           })()}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel this booking?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove the selected booking occurrence from the calendar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setPendingStatus(null);
+                setCancelDialogOpen(false);
+              }}
+            >
+              Keep booking
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setCancelDialogOpen(false);
+                setPendingStatus(null);
+                updateBookingStatus("CANCELLED");
+              }}
+            >
+              Cancel booking
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 };

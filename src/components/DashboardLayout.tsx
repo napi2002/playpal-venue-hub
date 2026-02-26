@@ -7,7 +7,6 @@ import {
   Calendar,
   BookOpen,
   CreditCard,
-  Settings,
   ChevronLeft,
   LogOut,
   IdCard,
@@ -27,7 +26,6 @@ const navigation = [
   { name: "Bookings", href: "/bookings", icon: BookOpen },
   { name: "Payments", href: "/payments", icon: CreditCard },
   { name: "Membership", href: "/membership", icon: IdCard },
-  { name: "Settings", href: "/settings", icon: Settings },
 ];
 
 const DashboardLayout = ({ children }: DashboardLayoutProps) => {

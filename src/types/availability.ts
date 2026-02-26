@@ -1,4 +1,4 @@
-export type BookingStatus = "PENDING" | "PAID";
+export type BookingStatus = "PENDING" | "PAID" | "CANCELLED";
 
 export type BookingEvent = {
   id: string;
@@ -8,4 +8,6 @@ export type BookingEvent = {
   end: string;
   eventName?: string | null;
   status: BookingStatus;
+  recurringId?: string;
+  occurrenceDate?: string;
 };

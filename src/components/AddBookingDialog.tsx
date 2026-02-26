@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,25 +14,40 @@ import { useRecurringBookings } from "@/hooks/useRecurringBookings";
 interface AddBookingDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialDate?: string;
+  initialTime?: string;
 }
 
-export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) => {
+const buildDefaultFormData = (date?: string, time?: string) => ({
+  date: date ?? new Date().toISOString().split("T")[0],
+  time: time ?? "09:00",
+  courtId: "",
+  player: "",
+  email: "",
+  duration: 60,
+  paymentStatus: "Pending",
+  notes: "",
+});
+
+export const AddBookingDialog = ({
+  open,
+  onOpenChange,
+  initialDate,
+  initialTime,
+}: AddBookingDialogProps) => {
   const { addBooking } = useBookings();
   const { courts } = useCourts();
   const { recurringBookings } = useRecurringBookings();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  const [formData, setFormData] = useState({
-    date: new Date().toISOString().split('T')[0],
-    time: "09:00",
-    courtId: "",
-    player: "",
-    email: "",
-    duration: 60,
-    paymentStatus: "Pending",
-    notes: "",
-  });
+  const [formData, setFormData] = useState(buildDefaultFormData(initialDate, initialTime));
+
+  useEffect(() => {
+    if (!open) return;
+    if (!initialDate && !initialTime) return;
+    setFormData(buildDefaultFormData(initialDate, initialTime));
+  }, [open, initialDate, initialTime]);
 
   const generateBookingNumber = () => {
     const timestamp = Date.now().toString().slice(-6);
@@ -166,16 +181,7 @@ export const AddBookingDialog = ({ open, onOpenChange }: AddBookingDialogProps) 
       });
 
       onOpenChange(false);
-      setFormData({
-        date: new Date().toISOString().split('T')[0],
-        time: "09:00",
-        courtId: "",
-        player: "",
-        email: "",
-        duration: 60,
-        paymentStatus: "Pending",
-        notes: "",
-      });
+      setFormData(buildDefaultFormData());
     } catch (error) {
       console.error("Error creating booking:", error);
     } finally {
