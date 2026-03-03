@@ -40,6 +40,7 @@ import { addDays, addMinutes, addWeeks, format, startOfDay, startOfWeek } from "
 import { useToast } from "@/hooks/use-toast";
 import type { BookingEvent, BookingStatus } from "@/types/availability";
 import { apiFetch } from "@/lib/apiClient";
+import { formatBangkokDateKey, toBangkokUtcIso } from "@/lib/datetime";
 
 const Availability = () => {
   const [selectedCourt, setSelectedCourt] = useState("all");
@@ -239,24 +240,8 @@ const Availability = () => {
     return `BK${timestamp}${random}`;
   };
 
-  const toBangkokUtcIso = (date: string, time: string) => {
-    const [year, month, day] = date.split("-").map(Number);
-    const [hour, minute] = time.split(":").map(Number);
-    const utcDate = new Date(Date.UTC(year, month - 1, day, hour - 7, minute, 0));
-    return utcDate.toISOString();
-  };
-
-  const formatDateKey = useCallback((value: Date) => {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Bangkok",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(value);
-  }, []);
-
-  const rangeStartKey = useMemo(() => formatDateKey(rangeStart), [formatDateKey, rangeStart]);
-  const rangeEndKey = useMemo(() => formatDateKey(rangeEnd), [formatDateKey, rangeEnd]);
+  const rangeStartKey = useMemo(() => formatBangkokDateKey(rangeStart), [rangeStart]);
+  const rangeEndKey = useMemo(() => formatBangkokDateKey(rangeEnd), [rangeEnd]);
 
   const recurringExceptionsQuery = useQuery({
     queryKey: ["recurring_exceptions", venue?.id, rangeStartKey, rangeEndKey],
@@ -276,10 +261,14 @@ const Availability = () => {
     refetchOnReconnect: false,
   });
 
-  const recurringExceptions = (recurringExceptionsQuery.data ?? []) as Array<{
-    recurring_booking_id: number;
-    occurrence_date: string | Date;
-  }>;
+  const recurringExceptions = useMemo(
+    () =>
+      (recurringExceptionsQuery.data ?? []) as Array<{
+        recurring_booking_id: number;
+        occurrence_date: string | Date;
+      }>,
+    [recurringExceptionsQuery.data],
+  );
 
   const recurringEvents = useMemo(() => {
     if (!recurringBookings.length) return [];
@@ -318,7 +307,7 @@ const Availability = () => {
     const byCourt = new Map(courts.map((court) => [court.id, court.name]));
 
     const normalizeExceptionDate = (value: string | Date) => {
-      if (value instanceof Date) return formatDateKey(value);
+      if (value instanceof Date) return formatBangkokDateKey(value);
       if (value.length >= 10) return value.slice(0, 10);
       return value;
     };
@@ -398,7 +387,10 @@ const Availability = () => {
     refetchOnReconnect: false,
   });
 
-  const bookingEventsData = bookingsQuery.data ?? [];
+  const bookingEventsData = useMemo(
+    () => bookingsQuery.data ?? [],
+    [bookingsQuery.data],
+  );
   const loadingBookingsData = bookingsQuery.isFetching;
   const refetchBookings = bookingsQuery.refetch;
 
@@ -493,7 +485,7 @@ const Availability = () => {
       });
       return;
     }
-    const dateKey = formatDateKey(start);
+    const dateKey = formatBangkokDateKey(start);
     const timeValue = format(start, "HH:mm");
     setSelectedSlot({ date: dateKey, time: timeValue });
     setBookingDialogOpen(true);

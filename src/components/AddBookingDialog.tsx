@@ -10,6 +10,7 @@ import { useCourts } from "@/hooks/useCourts";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/apiClient";
 import { useRecurringBookings } from "@/hooks/useRecurringBookings";
+import { toBangkokUtcIso } from "@/lib/datetime";
 
 interface AddBookingDialogProps {
   open: boolean;
@@ -53,14 +54,6 @@ export const AddBookingDialog = ({
     const timestamp = Date.now().toString().slice(-6);
     const random = Math.floor(Math.random() * 90) + 10;
     return `BK${timestamp}${random}`;
-  };
-
-  const toBangkokUtcIso = (date: string, time: string) => {
-    const [year, month, day] = date.split("-").map(Number);
-    const [hour, minute] = time.split(":").map(Number);
-    // Bangkok is UTC+7; store UTC in the DB.
-    const utcDate = new Date(Date.UTC(year, month - 1, day, hour - 7, minute, 0));
-    return utcDate.toISOString();
   };
 
   const overlapsRecurring = (courtId: string, startAt: string, endAt: string) => {

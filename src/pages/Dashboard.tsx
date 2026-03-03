@@ -53,22 +53,22 @@ const Dashboard = () => {
     [bangkokDateKey],
   );
 
-  const getBookingStart = (booking: typeof bookings[number]) => {
+  const getBookingStart = useCallback((booking: typeof bookings[number]) => {
     if (booking.slot_start) return new Date(booking.slot_start);
     if (booking.start_at) return new Date(booking.start_at);
     if (booking.date && booking.time) {
       return new Date(`${booking.date}T${booking.time}+07:00`);
     }
     return new Date(booking.created_at);
-  };
+  }, []);
 
-  const getBookingEnd = (booking: typeof bookings[number]) => {
+  const getBookingEnd = useCallback((booking: typeof bookings[number]) => {
     if (booking.slot_end) return new Date(booking.slot_end);
     if (booking.end_at) return new Date(booking.end_at);
     const start = getBookingStart(booking);
     const duration = Number(booking.duration_minutes ?? booking.duration ?? 60);
     return new Date(start.getTime() + duration * 60 * 1000);
-  };
+  }, [getBookingStart]);
 
   const paidBookingIds = useMemo(() => {
     return new Set(
@@ -109,7 +109,7 @@ const Dashboard = () => {
         return start >= todayStart && start <= todayEnd;
       })
       .sort((a, b) => getBookingStart(a).getTime() - getBookingStart(b).getTime());
-  }, [bookings, todayStart, todayEnd]);
+  }, [bookings, getBookingStart, todayStart, todayEnd]);
 
   const upcomingBookings = useMemo(() => {
     return bookings.filter((booking) => {
@@ -118,7 +118,7 @@ const Dashboard = () => {
       const end = getBookingEnd(booking);
       return start <= nextWeekEnd && end > now;
     });
-  }, [bookings, nextWeekEnd, now]);
+  }, [bookings, getBookingEnd, getBookingStart, nextWeekEnd, now]);
 
   const todaysRevenue = useMemo(() => {
     return todaysBookings.reduce((total, booking) => {
@@ -139,7 +139,7 @@ const Dashboard = () => {
     return [...upcomingBookings].sort(
       (a, b) => getBookingStart(a).getTime() - getBookingStart(b).getTime(),
     );
-  }, [upcomingBookings]);
+  }, [getBookingStart, upcomingBookings]);
 
   const unpaidSoon = useMemo(() => {
     const windowEnd = new Date(now.getTime() + 2 * 60 * 60 * 1000);
@@ -150,7 +150,7 @@ const Dashboard = () => {
       const start = getBookingStart(booking);
       return start >= now && start <= windowEnd;
     });
-  }, [bookings, getPaymentStatus, now]);
+  }, [bookings, getBookingStart, getPaymentStatus, now]);
 
   const weeklyRevenue = useMemo(() => {
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);

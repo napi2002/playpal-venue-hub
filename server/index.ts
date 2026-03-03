@@ -909,13 +909,13 @@ app.get("/payments/export", requireAdmin, async (req, res) => {
       row.status ? String(row.status).toUpperCase() : "PENDING",
       row.payment_method ?? "",
       row.created_at,
-    ].map((value) => `"${String(value ?? "").replace(/\"/g, '\"\"')}"`);
+    ].map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`);
     csvRows.push(values.join(","));
   }
 
   const filename = `payments_${new Date().toISOString().slice(0, 10)}.csv`;
   res.setHeader("Content-Type", "text/csv");
-  res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(csvRows.join("\n"));
 });
 
@@ -1530,6 +1530,5 @@ app.get("/crm/players/:playerId", requireAdmin, async (req, res) => {
 
 const port = Number(process.env.PORT || 3001);
 app.listen(port, () => {
-  // eslint-disable-next-line no-console
   console.log(`API server listening on ${port}`);
 });

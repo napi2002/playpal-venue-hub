@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -87,7 +87,7 @@ const PlayerProfile = () => {
   });
   const [noteInput, setNoteInput] = useState("");
 
-  const fetchPlayer = async () => {
+  const fetchPlayer = useCallback(async () => {
     if (!playerId) return;
     try {
       setLoading(true);
@@ -114,21 +114,21 @@ const PlayerProfile = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [playerId, toast]);
 
-  const fetchMembershipTypes = async () => {
+  const fetchMembershipTypes = useCallback(async () => {
     try {
       const data = (await apiFetch("/crm/memberships")) as MembershipType[];
       setMembershipTypes(data ?? []);
     } catch {
       setMembershipTypes([]);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchPlayer();
     fetchMembershipTypes();
-  }, [playerId]);
+  }, [fetchMembershipTypes, fetchPlayer]);
 
   const tags = useMemo(() => player?.tags ?? [], [player]);
 

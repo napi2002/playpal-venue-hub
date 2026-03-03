@@ -62,7 +62,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return () => {
       isMounted = false;
     };
-  }, [user?.id]);
+  }, [navigate, user]);
 
   if (loading || (user && checkingVenue)) {
     return (

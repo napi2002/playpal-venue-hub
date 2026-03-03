@@ -1217,7 +1217,7 @@ serve(async (req) => {
           row.status ? String(row.status).toUpperCase() : "PENDING",
           row.payment_method ?? "",
           row.created_at,
-        ].map((value) => `"${String(value ?? "").replace(/\"/g, '\"\"')}"`);
+        ].map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`);
         csvRows.push(values.join(","));
       }
       const filename = `payments_${new Date().toISOString().slice(0, 10)}.csv`;

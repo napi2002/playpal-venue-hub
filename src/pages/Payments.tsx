@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -116,9 +116,15 @@ const Payments = () => {
     return params;
   }, [pendingPage, searchQuery]);
 
-  const fetchSummary = async () => {
+  const queryParamString = useMemo(() => queryParams.toString(), [queryParams]);
+  const pendingQueryParamString = useMemo(
+    () => pendingQueryParams.toString(),
+    [pendingQueryParams],
+  );
+
+  const fetchSummary = useCallback(async () => {
     try {
-      const data = await apiFetch(`/api/payments/summary?${queryParams.toString()}`);
+      const data = await apiFetch(`/api/payments/summary?${queryParamString}`);
       setSummary(data as SummaryResponse);
     } catch (error) {
       toast({
@@ -127,13 +133,13 @@ const Payments = () => {
         variant: "destructive",
       });
     }
-  };
+  }, [queryParamString, toast]);
 
-  const fetchPayments = async () => {
+  const fetchPayments = useCallback(async () => {
     try {
       setIsLoading(true);
       setErrorMessage(null);
-      const response = (await apiFetch(`/api/payments?${queryParams.toString()}`)) as
+      const response = (await apiFetch(`/api/payments?${queryParamString}`)) as
         | PaymentsResponse
         | { data: PaymentRecord[]; total: number }
         | { items: PaymentRecord[]; total: number };
@@ -146,14 +152,14 @@ const Payments = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [queryParamString]);
 
-  const fetchPendingBookings = async () => {
+  const fetchPendingBookings = useCallback(async () => {
     try {
       setPendingLoading(true);
       setPendingError(null);
       const response = (await apiFetch(
-        `/api/payments/pending?${pendingQueryParams.toString()}`,
+        `/api/payments/pending?${pendingQueryParamString}`,
       )) as PendingBookingsResponse;
       setPendingBookings(response.data ?? []);
       setPendingTotal(response.total ?? 0);
@@ -164,16 +170,16 @@ const Payments = () => {
     } finally {
       setPendingLoading(false);
     }
-  };
+  }, [pendingQueryParamString]);
 
   useEffect(() => {
     fetchSummary();
     fetchPayments();
-  }, [queryParams.toString()]);
+  }, [fetchPayments, fetchSummary]);
 
   useEffect(() => {
     fetchPendingBookings();
-  }, [pendingQueryParams.toString()]);
+  }, [fetchPendingBookings]);
 
   const totalPages = Math.max(1, Math.ceil(totalPayments / PAGE_SIZE));
   const pendingTotalPages = Math.max(1, Math.ceil(pendingTotal / PAGE_SIZE));

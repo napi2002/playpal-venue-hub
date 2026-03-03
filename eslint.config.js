@@ -30,4 +30,10 @@ export default tseslint.config(
       globals: globals.node,
     },
   },
+  {
+    files: ["src/components/ui/**/*.{ts,tsx}", "src/contexts/**/*.{ts,tsx}"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
 );

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -115,7 +115,7 @@ const Membership = () => {
     return params.toString();
   }, [membershipFilter, page, searchQuery]);
 
-  const fetchPlayers = async () => {
+  const fetchPlayers = useCallback(async () => {
     try {
       setPlayersLoading(true);
       setPlayersError(null);
@@ -127,9 +127,9 @@ const Membership = () => {
     } finally {
       setPlayersLoading(false);
     }
-  };
+  }, [playerQuery]);
 
-  const fetchMembershipTypes = async () => {
+  const fetchMembershipTypes = useCallback(async () => {
     try {
       setTypesLoading(true);
       setTypesError(null);
@@ -140,15 +140,15 @@ const Membership = () => {
     } finally {
       setTypesLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchPlayers();
-  }, [playerQuery]);
+  }, [fetchPlayers]);
 
   useEffect(() => {
     fetchMembershipTypes();
-  }, []);
+  }, [fetchMembershipTypes]);
 
   const totalPages = Math.max(1, Math.ceil(totalPlayers / PAGE_SIZE));
 
