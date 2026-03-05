@@ -94,6 +94,19 @@ const parseId = (value: string | undefined) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+function extractLatLngFromMapsUrl(
+  url: string | null | undefined,
+): { latitude: number; longitude: number } | null {
+  if (!url) return null;
+  const atMatch = url.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+  if (atMatch) return { latitude: parseFloat(atMatch[1]), longitude: parseFloat(atMatch[2]) };
+  const qMatch = url.match(/[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+  if (qMatch) return { latitude: parseFloat(qMatch[1]), longitude: parseFloat(qMatch[2]) };
+  const placeMatch = url.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/);
+  if (placeMatch) return { latitude: parseFloat(placeMatch[1]), longitude: parseFloat(placeMatch[2]) };
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -225,6 +238,9 @@ serve(async (req) => {
       const body = await parseJsonBody(req);
       const profile = body.profile ?? body ?? {};
 
+      const latitude = typeof body.latitude === "number" ? body.latitude : null;
+      const longitude = typeof body.longitude === "number" ? body.longitude : null;
+
       await client.queryObject(
         `
           update public.venues
@@ -244,6 +260,8 @@ serve(async (req) => {
             email = $13,
             phone = $14,
             sports_supported = $15,
+            latitude = coalesce($17::numeric, latitude),
+            longitude = coalesce($18::numeric, longitude),
             updated_at = now()
           where id = $16
         `,
@@ -264,6 +282,8 @@ serve(async (req) => {
           profile.phone ?? null,
           profile.sports_supported ?? profile.sportsSupported ?? [],
           venueId,
+          latitude,
+          longitude,
         ],
       );
       return jsonResponse({ ok: true });
@@ -1722,6 +1742,34 @@ serve(async (req) => {
         notes,
         bookings,
       });
+    }
+
+    if (req.method === "GET" && pathname === "/api/resolve-url") {
+      const rawUrl = url.searchParams.get("url");
+      if (!rawUrl) return jsonResponse({ error: "url query param required" }, 400);
+
+      try {
+        const response = await fetch(rawUrl, {
+          method: "GET",
+          redirect: "follow",
+          headers: {
+            "User-Agent": "Mozilla/5.0 (compatible; PlayPal/1.0; +https://playpal.app)",
+          },
+        });
+
+        const resolvedUrl = response.url;
+        const coords = extractLatLngFromMapsUrl(resolvedUrl);
+
+        return jsonResponse({
+          resolvedUrl,
+          latitude: coords?.latitude ?? null,
+          longitude: coords?.longitude ?? null,
+          extracted: coords !== null,
+        });
+      } catch (err) {
+        console.error("resolve-url error:", err);
+        return jsonResponse({ error: "Failed to resolve URL" }, 500);
+      }
     }
 
     return jsonResponse({ error: "Not found" }, 404);

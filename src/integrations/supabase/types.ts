@@ -572,6 +572,8 @@ export type Database = {
           timezone: string | null;
           tax_information: string | null;
           sports_supported: string[];
+          latitude: number | null;
+          longitude: number | null;
         };
         Insert: {
           id?: number;
@@ -604,6 +606,8 @@ export type Database = {
           timezone?: string | null;
           tax_information?: string | null;
           sports_supported?: string[];
+          latitude: number | null;
+          longitude: number | null;
         };
         Update: {
           id?: number;
@@ -636,6 +640,8 @@ export type Database = {
           timezone?: string | null;
           tax_information?: string | null;
           sports_supported?: string[];
+          latitude: number | null;
+          longitude: number | null;
         };
         Relationships: [];
       };

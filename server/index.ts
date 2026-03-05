@@ -72,6 +72,54 @@ app.get("/api/uploads/:id", (req, res) => {
   res.send(entry.buffer);
 });
 
+function extractLatLngFromMapsUrl(
+  url: string | null | undefined,
+): { latitude: number; longitude: number } | null {
+  if (!url) return null;
+  const atMatch = url.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+  if (atMatch) return { latitude: parseFloat(atMatch[1]), longitude: parseFloat(atMatch[2]) };
+  const qMatch = url.match(/[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+  if (qMatch) return { latitude: parseFloat(qMatch[1]), longitude: parseFloat(qMatch[2]) };
+  const placeMatch = url.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/);
+  if (placeMatch) return { latitude: parseFloat(placeMatch[1]), longitude: parseFloat(placeMatch[2]) };
+  const searchMatch = url.match(/\/maps\/search\/(-?\d+\.?\d*),\+?(-?\d+\.?\d*)/);
+  if (searchMatch) return { latitude: parseFloat(searchMatch[1]), longitude: parseFloat(searchMatch[2]) };
+  return null;
+}
+
+app.get("/api/resolve-url", requireAdmin, async (req, res) => {
+  const rawUrl = req.query.url ? String(req.query.url) : null;
+  if (!rawUrl) {
+    res.status(400).json({ error: "url query param required" });
+    return;
+  }
+
+  try {
+    const response = await fetch(rawUrl, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        // mimic browser so no CORs bullshit
+        "User-Agent":
+          "Mozilla/5.0 (compatible; PlayPal/1.0; +https://playpal.app)",
+      },
+    });
+
+    const resolvedUrl = response.url; // final URL after all redirects
+    const coords = extractLatLngFromMapsUrl(resolvedUrl);
+
+    res.json({
+      resolvedUrl,
+      latitude: coords?.latitude ?? null,
+      longitude: coords?.longitude ?? null,
+      extracted: coords !== null,
+    });
+  } catch (err) {
+    console.error("resolve-url error:", err);
+    res.status(500).json({ error: "Failed to resolve URL" });
+  }
+});
+
 app.get("/api/venue", requireAdmin, async (req, res) => {
   const authedReq = req as AuthedRequest;
   const venueId = await getPrimaryVenueId(authedReq.user.id);
@@ -217,6 +265,14 @@ app.put("/api/venues/:venueId", requireAdmin, async (req, res) => {
   }
 
   const { profile, status } = parsed.data;
+
+  const latitude = typeof (authedReq.body as Record<string, unknown>).latitude === "number"
+    ? (authedReq.body as Record<string, unknown>).latitude as number
+    : null;
+  const longitude = typeof (authedReq.body as Record<string, unknown>).longitude === "number"
+    ? (authedReq.body as Record<string, unknown>).longitude as number
+    : null;
+
   await pool.query(
     `update public.venues
      set name = $1,
@@ -234,6 +290,8 @@ app.put("/api/venues/:venueId", requireAdmin, async (req, res) => {
          email = $12,
          phone = $13,
          status = coalesce($14, status),
+         latitude = coalesce($16, latitude),
+         longitude = coalesce($17, longitude),
          updated_at = now()
      where id = $15`,
     [
@@ -252,6 +310,8 @@ app.put("/api/venues/:venueId", requireAdmin, async (req, res) => {
       profile.phone,
       status ?? null,
       venueId,
+      latitude,
+      longitude,
     ],
   );
 

@@ -65,6 +65,7 @@ const Venue = () => {
     weekendPrice: "",
   });
   const [isSavingCourt, setIsSavingCourt] = useState(false);
+  const [coordsStatus, setCoordsStatus] = useState<"idle" | "resolving" | "done" | "failed">("idle");
   const [formData, setFormData] = useState({
     name_en: "",
     name_th: "",
@@ -323,6 +324,35 @@ const Venue = () => {
 
   const selectableSports = selectedSports.length > 0 ? selectedSports : sportOptions;
 
+  const isGoogleMapsUrl = (url: string) => {
+    return (
+      url.includes("maps.app.goo.gl") ||
+      url.includes("maps.google.com") ||
+      url.includes("google.com/maps") ||
+      url.includes("goo.gl/maps")
+    );
+  };
+
+  const resolveCoords = async (
+    mapsUrl: string | null | undefined,
+  ): Promise<{ latitude: number; longitude: number } | null> => {
+    if (!mapsUrl?.trim()) return null;
+    try {
+      setCoordsStatus("resolving");
+      const encoded = encodeURIComponent(mapsUrl.trim());
+      const result = await apiFetch(`/api/resolve-url?url=${encoded}`);
+      if (result?.extracted && result.latitude != null && result.longitude != null) {
+        setCoordsStatus("done");
+        return { latitude: result.latitude, longitude: result.longitude };
+      }
+      setCoordsStatus("failed");
+      return null;
+    } catch {
+      setCoordsStatus("failed");
+      return null;
+    }
+  };
+
   const handleSave = async () => {
     const nameValue = formData.name_en.trim() || venue?.name || "New Venue";
     const normalizedSelected = selectedSports.map((sport) => String(sport).toUpperCase());
@@ -333,6 +363,23 @@ const Venue = () => {
         : normalizedSelected.length > 1
           ? "MULTI_SPORT"
           : venue?.venue_type ?? null;
+    const mapsUrl = toNullableValue(formData.google_maps_url);
+
+    if (mapsUrl && !isGoogleMapsUrl(mapsUrl)) {
+      toast({
+        title: "Invalid Google Maps URL",
+        description: "Please use a Google Maps link. Open Google Maps, find your venue, and tap Share → Copy link.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const urlChanged = mapsUrl !== (venue?.google_maps_url ?? null);
+    const coordsMissing = !venue?.latitude || !venue?.longitude;
+    const coords = (urlChanged || coordsMissing)
+      ? await resolveCoords(mapsUrl)
+      : null;
+
     const updates = {
       name: nameValue,
       name_en: nameValue,
@@ -352,6 +399,8 @@ const Venue = () => {
       default_slot_duration_mins: formData.default_slot_duration_mins
         ? Number(formData.default_slot_duration_mins)
         : null,
+      latitude: coords?.latitude ?? null,
+      longitude: coords?.longitude ?? null,
     };
 
     if (venue) {
@@ -614,28 +663,33 @@ const Venue = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Google Maps URL</Label>
+                  <Label className="flex items-center justify-between">
+                    <span>Google Maps URL</span>
+                    {coordsStatus === "resolving" && (
+                      <span className="text-xs text-muted-foreground animate-pulse"> Extracting coordinates...</span>
+                    )}
+                    {coordsStatus === "done" && (
+                      <span className="text-xs text-green-600 font-medium"> Coordinates saved</span>
+                    )}
+                    {coordsStatus === "failed" && (
+                      <span className="text-xs text-amber-600"> Could not extract coordinates</span>
+                    )}
+                  </Label>
                   <Input
                     value={formData.google_maps_url}
-                    placeholder={isLoading ? "Loading..." : "Not set"}
-                    onChange={(e) => setFormData({ ...formData, google_maps_url: e.target.value })}
+                    placeholder="https://maps.app.goo.gl/..."
+                    onChange={(e) => {
+                      setFormData({ ...formData, google_maps_url: e.target.value });
+                      setCoordsStatus("idle");
+                    }}
                     readOnly={isReadOnly}
                   />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <Clock className="h-4 w-4" />
-                    Opening hours
-                  </Label>
-                  {openingHoursSummary.length ? (
-                    <div className="grid gap-1 text-sm text-muted-foreground">
-                      {openingHoursSummary.map((line) => (
-                        <div key={line}>{line}</div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Not set</p>
+                  {!isReadOnly && (
+                    <p className="text-xs text-muted-foreground">
+                      Use a link from <strong>Google Maps</strong> — not Google Search. 
+                      On mobile: open Google Maps app → find your venue → Share → Copy link. 
+                      On desktop: copy the URL directly from your browser address bar.
+                    </p>
                   )}
                 </div>
 
