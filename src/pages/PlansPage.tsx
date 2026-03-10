@@ -15,6 +15,8 @@ type PlanType = "starter" | "growth" | "pro" | "custom";
 
 type PlanRow = {
   id: number;
+  portal_account_id: number | null;
+  account_source: "portal" | "owner";
   venue_id: number;
   venue_name: string;
   admin_account_name: string | null;
@@ -73,8 +75,8 @@ const PlansPage = () => {
   const addPlan = useMutation({
     mutationFn: async () => {
       const target = rows.find((row) => String(row.id) === form.accountId);
-      if (!target) throw new Error("Select a venue admin first");
-      await apiFetch(`/api/court-accounts/${target.id}`, {
+      if (!target?.portal_account_id) throw new Error("Select a managed venue admin first");
+      await apiFetch(`/api/court-accounts/${target.portal_account_id}`, {
         method: "PUT",
         body: JSON.stringify({
           plan: form.plan,
@@ -117,9 +119,9 @@ const PlansPage = () => {
                 <div className="grid gap-2">
                   <Label>Venue Admin</Label>
                   <Select value={form.accountId} onValueChange={(value) => setForm((current) => ({ ...current, accountId: value }))}>
-                    <SelectTrigger><SelectValue placeholder="Select venue admin" /></SelectTrigger>
-                    <SelectContent>
-                      {rows.map((row) => (
+                      <SelectTrigger><SelectValue placeholder="Select venue admin" /></SelectTrigger>
+                      <SelectContent>
+                      {rows.filter((row) => !!row.portal_account_id).map((row) => (
                         <SelectItem key={row.id} value={String(row.id)}>
                           {row.venue_name} · {row.admin_email}
                         </SelectItem>
@@ -186,7 +188,12 @@ const PlansPage = () => {
                 {rows.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell>{row.venue_name}</TableCell>
-                    <TableCell>{row.admin_account_name || row.admin_email}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <span>{row.admin_account_name || row.admin_email}</span>
+                        {row.account_source === "owner" ? <span className="text-xs text-slate-500">Existing admin</span> : null}
+                      </div>
+                    </TableCell>
                     <TableCell className="capitalize">{row.plan}</TableCell>
                     <TableCell>THB {Number(row.monthly_fee_thb).toLocaleString()}</TableCell>
                     <TableCell>{row.commission_percent}%</TableCell>
@@ -195,10 +202,14 @@ const PlansPage = () => {
                     <TableCell>{row.expires_at ? new Date(row.expires_at).toLocaleDateString() : "—"}</TableCell>
                     <TableCell>{row.expiry_status}</TableCell>
                     <TableCell>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setEditing(row)}>Update Plan</Button>
-                        <Button variant="outline" size="sm" onClick={() => setEditing(row)}>Override Commission</Button>
-                      </div>
+                      {row.portal_account_id ? (
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setEditing(row)}>Update Plan</Button>
+                          <Button variant="outline" size="sm" onClick={() => setEditing(row)}>Override Commission</Button>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-slate-500">No managed plan yet</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -262,7 +273,7 @@ const PlansPage = () => {
                   </div>
                 </div>
                 <Button className="bg-[#FF7A33] text-white hover:bg-[#e56f2f]" onClick={() => updatePlan.mutate({
-                  id: editing.id,
+                  id: editing.portal_account_id ?? editing.id,
                   plan: editing.plan,
                   commissionPercent: editing.commission_percent,
                   monthlyFeeThb: editing.monthly_fee_thb,

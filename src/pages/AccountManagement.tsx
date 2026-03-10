@@ -17,6 +17,8 @@ type PlanType = "starter" | "growth" | "pro" | "custom";
 
 type UserRow = {
   id: number;
+  portal_account_id: number | null;
+  account_source: "portal" | "owner";
   venue_id: number;
   venue_name: string;
   admin_account_name: string | null;
@@ -292,7 +294,12 @@ const AccountManagement = () => {
                     <TableCell>{row.venue_name}</TableCell>
                     <TableCell>{row.admin_account_name || "—"}</TableCell>
                     <TableCell>{row.admin_email}</TableCell>
-                    <TableCell><Badge variant="secondary" className="capitalize">{row.plan}</Badge></TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="capitalize">{row.plan}</Badge>
+                        {row.account_source === "owner" ? <span className="text-xs text-slate-500">Existing admin</span> : null}
+                      </div>
+                    </TableCell>
                     <TableCell>THB {Number(row.monthly_fee_thb).toLocaleString()}</TableCell>
                     <TableCell>{row.commission_percent}%</TableCell>
                     <TableCell>{row.months_paid}</TableCell>
@@ -309,21 +316,27 @@ const AccountManagement = () => {
                     <TableCell>
                       <div className="flex flex-wrap gap-2">
                         <Button variant="outline" size="sm" onClick={() => navigate(`/users/${row.venue_id}`)}>View Venue</Button>
-                        <Button variant="outline" size="sm" onClick={() => setEditing(row)}>Edit Plan</Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => updateAdmin.mutate({
-                            id: row.id,
-                            plan: row.plan,
-                            commissionPercent: row.commission_percent,
-                            monthlyFeeThb: row.monthly_fee_thb,
-                            monthsPaid: row.months_paid,
-                            isActive: row.status !== "Active",
-                          })}
-                        >
-                          {row.status === "Active" ? "Suspend Account" : "Activate Account"}
-                        </Button>
+                        {row.portal_account_id ? (
+                          <>
+                            <Button variant="outline" size="sm" onClick={() => setEditing(row)}>Edit Plan</Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => updateAdmin.mutate({
+                                id: row.portal_account_id,
+                                plan: row.plan,
+                                commissionPercent: row.commission_percent,
+                                monthlyFeeThb: row.monthly_fee_thb,
+                                monthsPaid: row.months_paid,
+                                isActive: row.status !== "Active",
+                              })}
+                            >
+                              {row.status === "Active" ? "Suspend Account" : "Activate Account"}
+                            </Button>
+                          </>
+                        ) : (
+                          <Button variant="outline" size="sm" onClick={() => navigate(`/users/${row.venue_id}`)}>Existing Admin</Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -371,7 +384,7 @@ const AccountManagement = () => {
                   Monthly fee is the venue subscription. Commission is PlayPal&apos;s booking share.
                 </p>
                 <Button className="bg-[#FF7A33] text-white hover:bg-[#e56f2f]" onClick={() => updateAdmin.mutate({
-                  id: editing.id,
+                  id: editing.portal_account_id ?? editing.id,
                   plan: editing.plan,
                   commissionPercent: editing.commission_percent,
                   monthlyFeeThb: editing.monthly_fee_thb,

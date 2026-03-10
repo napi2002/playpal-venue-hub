@@ -889,59 +889,93 @@ serve(async (req) => {
 
       if (venueId && venueId !== "all") {
         params.push(venueId);
-        where.push(`cpa.venue_id = $${params.length}::int`);
+        where.push(`account.venue_id = $${params.length}::int`);
       }
       if (plan && plan !== "all") {
         params.push(plan);
-        where.push(`cpa.plan::text = $${params.length}`);
+        where.push(`account.plan::text = $${params.length}`);
       }
       if (status && status !== "all") {
         if (status === "active") {
-          where.push("cpa.is_active = true");
+          where.push("account.is_active = true");
         } else if (status === "suspended") {
-          where.push("cpa.is_active = false");
+          where.push("account.is_active = false");
         }
       }
       if (query) {
         params.push(`%${query}%`);
         where.push(`(
-          lower(v.name) like $${params.length}
-          or lower(cpa.login_email) like $${params.length}
-          or lower(coalesce(u.full_name, '')) like $${params.length}
+          lower(account.venue_name) like $${params.length}
+          or lower(account.admin_email) like $${params.length}
+          or lower(coalesce(account.admin_account_name, '')) like $${params.length}
         )`);
       }
 
       const { rows } = await client.queryObject(
         `
-          select
-            cpa.id,
-            cpa.venue_id,
-            v.name as venue_name,
-            u.full_name as admin_account_name,
-            cpa.login_email as admin_email,
-            cpa.plan,
-            cpa.commission_percent,
-            cpa.monthly_fee_thb,
-            cpa.months_paid,
-            case when cpa.is_active then 'Active' else 'Suspended' end as status,
-            cpa.created_at,
-            cpa.court_id,
-            c.name as court_name,
-            case
-              when cpa.months_paid > 0 then cpa.created_at + (cpa.months_paid || ' months')::interval
-              else null
-            end as expires_at,
-            case
-              when cpa.months_paid > 0 and cpa.created_at + (cpa.months_paid || ' months')::interval <= now() then 'Expired'
-              when cpa.months_paid > 0 and cpa.created_at + (cpa.months_paid || ' months')::interval <= now() + interval '14 days' then 'Expiring Soon'
-              else 'Active'
-            end as expiry_status
-          from public.court_portal_accounts cpa
-          join public.venues v on v.id = cpa.venue_id
-          left join public.courts c on c.id = cpa.court_id
-          join public.users u on u.id = cpa.user_id
+          with account as (
+            select
+              cpa.id,
+              cpa.id as portal_account_id,
+              'portal'::text as account_source,
+              cpa.venue_id,
+              v.name as venue_name,
+              u.full_name as admin_account_name,
+              cpa.login_email as admin_email,
+              cpa.plan,
+              cpa.commission_percent,
+              cpa.monthly_fee_thb,
+              cpa.months_paid,
+              cpa.is_active,
+              case when cpa.is_active then 'Active' else 'Suspended' end as status,
+              cpa.created_at,
+              cpa.court_id,
+              c.name as court_name,
+              case
+                when cpa.months_paid > 0 then cpa.created_at + (cpa.months_paid || ' months')::interval
+                else null
+              end as expires_at,
+              case
+                when cpa.months_paid > 0 and cpa.created_at + (cpa.months_paid || ' months')::interval <= now() then 'Expired'
+                when cpa.months_paid > 0 and cpa.created_at + (cpa.months_paid || ' months')::interval <= now() + interval '14 days' then 'Expiring Soon'
+                else 'Active'
+              end as expiry_status
+            from public.court_portal_accounts cpa
+            join public.venues v on v.id = cpa.venue_id
+            left join public.courts c on c.id = cpa.court_id
+            join public.users u on u.id = cpa.user_id
+
+            union all
+
+            select
+              -u.id as id,
+              null::integer as portal_account_id,
+              'owner'::text as account_source,
+              v.id as venue_id,
+              v.name as venue_name,
+              u.full_name as admin_account_name,
+              u.email as admin_email,
+              'custom'::public.court_plan as plan,
+              0::numeric as commission_percent,
+              0::numeric as monthly_fee_thb,
+              0::integer as months_paid,
+              u.is_active,
+              case when u.is_active then 'Active' else 'Suspended' end as status,
+              u.created_at,
+              null::integer as court_id,
+              null::text as court_name,
+              null::timestamptz as expires_at,
+              'Active'::text as expiry_status
+            from public.venues v
+            join public.users u on u.id = v.owner_id
+            left join public.court_portal_accounts cpa on cpa.user_id = u.id and cpa.venue_id = v.id
+            where u.role = 'admin'
+              and cpa.id is null
+          )
+          select *
+          from account
           ${where.length ? `where ${where.join(" and ")}` : ""}
-          order by cpa.created_at desc
+          order by account.created_at desc
         `,
         params,
       );
