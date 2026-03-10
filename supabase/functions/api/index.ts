@@ -883,6 +883,7 @@ serve(async (req) => {
       const plan = url.searchParams.get("plan");
       const status = url.searchParams.get("status");
       const venueId = url.searchParams.get("venueId");
+      const includeExisting = url.searchParams.get("includeExisting") === "true";
       const query = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
       const params: Array<string> = [];
       const where: string[] = [];
@@ -913,7 +914,7 @@ serve(async (req) => {
 
       const { rows } = await client.queryObject(
         `
-          with account as (
+          with portal_accounts as (
             select
               cpa.id,
               cpa.id as portal_account_id,
@@ -944,9 +945,8 @@ serve(async (req) => {
             join public.venues v on v.id = cpa.venue_id
             left join public.courts c on c.id = cpa.court_id
             join public.users u on u.id = cpa.user_id
-
-            union all
-
+          ),
+          existing_owners as (
             select
               -u.id as id,
               null::integer as portal_account_id,
@@ -971,6 +971,10 @@ serve(async (req) => {
             left join public.court_portal_accounts cpa on cpa.user_id = u.id and cpa.venue_id = v.id
             where u.role = 'admin'
               and cpa.id is null
+          ),
+          account as (
+            select * from portal_accounts
+            ${includeExisting ? "union all select * from existing_owners" : ""}
           )
           select *
           from account
@@ -1010,6 +1014,7 @@ serve(async (req) => {
         `
           select
             cpa.id,
+            cpa.id as portal_account_id,
             u.full_name as name,
             cpa.login_email as email,
             u.updated_at as last_login,
@@ -1018,6 +1023,37 @@ serve(async (req) => {
           join public.users u on u.id = cpa.user_id
           where cpa.venue_id = $1
           order by cpa.created_at desc
+        `,
+        [venueId],
+      );
+
+      const { rows: planRows } = await client.queryObject<{
+        id: number;
+        plan: PlanType;
+        commission_percent: string;
+        monthly_fee_thb: string;
+        months_paid: number;
+        created_at: string;
+        expires_at: string | null;
+        status: "Active" | "Suspended";
+      }>(
+        `
+          select
+            cpa.id,
+            cpa.plan,
+            cpa.commission_percent::text,
+            cpa.monthly_fee_thb::text,
+            cpa.months_paid,
+            cpa.created_at,
+            case
+              when cpa.months_paid > 0 then cpa.created_at + (cpa.months_paid || ' months')::interval
+              else null
+            end as expires_at,
+            case when cpa.is_active then 'Active' else 'Suspended' end as status
+          from public.court_portal_accounts cpa
+          where cpa.venue_id = $1
+          order by cpa.created_at desc
+          limit 1
         `,
         [venueId],
       );
@@ -1054,7 +1090,47 @@ serve(async (req) => {
         venue: venueRows[0],
         admins: adminRows,
         metrics: metricRows[0] ?? null,
+        planSettings: planRows[0] ?? null,
       });
+    }
+
+    if (req.method === "GET" && pathname === "/api/internal/plans") {
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
+      }
+
+      const { rows } = await client.queryObject(
+        `
+          select
+            cpa.id,
+            cpa.id as portal_account_id,
+            cpa.venue_id,
+            v.name as venue_name,
+            u.full_name as admin_account_name,
+            cpa.login_email as admin_email,
+            cpa.plan,
+            cpa.commission_percent,
+            cpa.monthly_fee_thb,
+            cpa.months_paid,
+            case when cpa.is_active then 'Active' else 'Suspended' end as status,
+            cpa.created_at,
+            case
+              when cpa.months_paid > 0 then cpa.created_at + (cpa.months_paid || ' months')::interval
+              else null
+            end as expires_at,
+            case
+              when cpa.months_paid > 0 and cpa.created_at + (cpa.months_paid || ' months')::interval <= now() then 'Expired'
+              when cpa.months_paid > 0 and cpa.created_at + (cpa.months_paid || ' months')::interval <= now() + interval '14 days' then 'Expiring Soon'
+              else 'Active'
+            end as expiry_status
+          from public.court_portal_accounts cpa
+          join public.venues v on v.id = cpa.venue_id
+          join public.users u on u.id = cpa.user_id
+          order by cpa.created_at desc
+        `,
+      );
+
+      return jsonResponse(rows);
     }
 
     if (req.method === "GET" && pathname === "/api/internal/court-accounts") {

@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthSession } from "@/contexts/AuthContext";
 import { apiFetch, resolveLoginIdentifier } from "@/lib/apiClient";
@@ -7,6 +8,7 @@ import { apiFetch, resolveLoginIdentifier } from "@/lib/apiClient";
 export const useAuth = () => {
   const { user, session, loading } = useAuthSession();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const getErrorMessage = (error: unknown, fallback: string) =>
     error instanceof Error && error.message ? error.message : fallback;
@@ -24,7 +26,8 @@ export const useAuth = () => {
       if (error) throw error;
 
       try {
-        await apiFetch("/api/me");
+        const portalContext = await apiFetch("/api/me");
+        queryClient.setQueryData(["portal-context", data.user?.id ?? null], portalContext);
       } catch (adminError) {
         await supabase.auth.signOut();
         toast.error("Portal access required");

@@ -80,12 +80,15 @@ const AccountManagement = () => {
     queryKey: ["internal-users", filters, presetVenueId],
     queryFn: async () => {
       const params = new URLSearchParams();
+      params.set("includeExisting", "true");
       if (filters.plan !== "all") params.set("plan", filters.plan);
       if (filters.status !== "all") params.set("status", filters.status.toLowerCase());
       if (filters.q.trim()) params.set("q", filters.q.trim());
       if (presetVenueId) params.set("venueId", presetVenueId);
       return (await apiFetch(`/api/internal/users?${params.toString()}`)) as UserRow[];
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const refetchKeys = () => {

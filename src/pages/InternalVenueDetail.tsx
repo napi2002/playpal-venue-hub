@@ -20,6 +20,7 @@ type VenueDetail = {
   };
   admins: Array<{
     id: number;
+    portal_account_id: number;
     name: string | null;
     email: string;
     last_login: string | null;
@@ -30,6 +31,16 @@ type VenueDetail = {
     total_gmv: string;
     total_commission: string;
     bookings_30d: number;
+  } | null;
+  planSettings: {
+    id: number;
+    plan: "starter" | "growth" | "pro" | "custom";
+    commission_percent: string;
+    monthly_fee_thb: string;
+    months_paid: number;
+    created_at: string;
+    expires_at: string | null;
+    status: "Active" | "Suspended";
   } | null;
 };
 
@@ -44,40 +55,27 @@ const InternalVenueDetail = () => {
     queryFn: async () => (await apiFetch(`/api/internal/venues/${venueId}`)) as VenueDetail,
   });
 
-  const { data: users = [] } = useQuery({
-    queryKey: ["internal-users-by-venue", venueId],
-    enabled: !!venueId,
-    queryFn: async () => (await apiFetch(`/api/internal/users?venueId=${venueId}`)) as Array<{
-      id: number;
-      plan: "starter" | "growth" | "pro" | "custom";
-      commission_percent: number;
-      monthly_fee_thb: number;
-      months_paid: number;
-      created_at: string;
-      expires_at: string | null;
-      status: "Active" | "Suspended";
-    }>,
-  });
-
-  const primaryPlan = users[0];
+  const primaryPlan = data?.planSettings ?? null;
 
   const disableAdmin = useMutation({
     mutationFn: async (id: number) => {
-      const target = users.find((user) => user.id === id);
+      const target = data?.admins.find((admin) => admin.id === id);
       if (!target) throw new Error("Admin not found");
-      await apiFetch(`/api/court-accounts/${id}`, {
+      await apiFetch(`/api/court-accounts/${target.portal_account_id}`, {
         method: "PUT",
         body: JSON.stringify({
-          plan: target.plan,
-          commissionPercent: target.commission_percent,
-          monthlyFeeThb: target.monthly_fee_thb,
+          plan: primaryPlan?.plan ?? "custom",
+          commissionPercent: Number(primaryPlan?.commission_percent ?? 0),
+          monthlyFeeThb: Number(primaryPlan?.monthly_fee_thb ?? 0),
+          monthsPaid: primaryPlan?.months_paid ?? 0,
           isActive: false,
         }),
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["internal-venue-detail", venueId] });
-      queryClient.invalidateQueries({ queryKey: ["internal-users-by-venue", venueId] });
+      queryClient.invalidateQueries({ queryKey: ["internal-users"] });
+      queryClient.invalidateQueries({ queryKey: ["internal-plans"] });
       toast.success("Admin disabled");
     },
   });
@@ -159,7 +157,7 @@ const InternalVenueDetail = () => {
           <CardContent className="grid gap-2 text-sm">
             <p>Plan type: <span className="font-medium capitalize">{primaryPlan?.plan || "—"}</span></p>
             <p>Monthly subscription fee: <span className="font-medium">THB {Number(primaryPlan?.monthly_fee_thb ?? 0).toLocaleString()}</span></p>
-            <p>Commission percentage: <span className="font-medium">{primaryPlan?.commission_percent ?? 0}%</span></p>
+            <p>Commission percentage: <span className="font-medium">{Number(primaryPlan?.commission_percent ?? 0)}%</span></p>
             <p>Months paid: <span className="font-medium">{primaryPlan?.months_paid ?? 0}</span></p>
             <p>Created on: <span className="font-medium">{primaryPlan?.created_at ? new Date(primaryPlan.created_at).toLocaleDateString() : "—"}</span></p>
             <p>Package expiry: <span className="font-medium">{primaryPlan?.expires_at ? new Date(primaryPlan.expires_at).toLocaleDateString() : "—"}</span></p>

@@ -53,13 +53,17 @@ export const apiFetch = async (path: string, options: RequestInit = {}) => {
 };
 
 export const resolveLoginIdentifier = async (identifier: string) => {
+  const normalized = identifier.trim().toLowerCase();
+  if (normalized.includes("@")) {
+    return { email: normalized };
+  }
   const path = IS_FUNCTIONS_BASE ? "/login-identifier" : "/api/auth/login-identifier";
   const headers = new Headers({ "Content-Type": "application/json" });
 
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ identifier }),
+    body: JSON.stringify({ identifier: normalized }),
   });
 
   return parseResponse(response) as Promise<{ email: string }>;

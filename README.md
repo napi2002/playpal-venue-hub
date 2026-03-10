@@ -1,73 +1,270 @@
-# Welcome to your Lovable project
+# PlayPal Venue Hub
 
-## Project info
+PlayPal Venue Hub is the web portal for venue operations and internal platform management.
 
-**URL**: https://lovable.dev/projects/57684921-7e34-4d2c-8b5e-5988b8c4c47a
+It supports three user types:
 
-## How can I edit this code?
+- `user`: mobile app users only
+- `admin`: venue portal admins
+- `internal`: PlayPal internal operations users
 
-There are several ways of editing your application.
+The frontend is a Vite + React app. Production API traffic goes to Supabase Edge Functions. There is also a local Express server for local development fallback.
 
-**Use Lovable**
+## Stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/57684921-7e34-4d2c-8b5e-5988b8c4c47a) and start prompting.
+- Vite
+- React
+- TypeScript
+- Tailwind CSS
+- shadcn/ui
+- TanStack Query
+- Supabase Auth
+- Supabase Edge Functions
+- PostgreSQL
 
-Changes made via Lovable will be committed automatically to this repo.
+## Main App Areas
 
-**Use your preferred IDE**
+Venue admin portal:
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+- `/dashboard`
+- `/venue`
+- `/availability`
+- `/bookings`
+- `/payments`
+- `/membership`
+- `/settings`
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+Internal operations console:
 
-Follow these steps:
+- `/dashboard`
+- `/users`
+- `/users/:venueId`
+- `/bookings`
+- `/payments`
+- `/plans`
+- `/support`
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+Notes:
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+- `internal` users are redirected into the internal console
+- `admin` users access the venue portal
+- login accepts either email or username
 
-# Step 3: Install the necessary dependencies.
-npm i
+## Project Structure
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```text
+src/                        Frontend app
+supabase/functions/api/     Main Supabase Edge API
+supabase/functions/login-identifier/
+                            Public login helper for username -> email lookup
+supabase/migrations/        Database schema and feature migrations
+server/                     Optional local Express API
+public/                     Static assets
+```
+
+## Local Development
+
+Requirements:
+
+- Node.js 18+
+- npm
+- Supabase CLI if you are pushing migrations or deploying functions
+
+Install:
+
+```bash
+npm install
+```
+
+Run the frontend:
+
+```bash
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Optional: run the local Express server:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+npm run dev:server
+```
 
-**Use GitHub Codespaces**
+## Environment Variables
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Frontend `.env`
 
-## What technologies are used for this project?
+The frontend normally points to Supabase Functions:
 
-This project is built with:
+```env
+VITE_SUPABASE_PROJECT_ID=cpfosrovcqsfwwoekrdw
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
+VITE_SUPABASE_URL=https://cpfosrovcqsfwwoekrdw.supabase.co
+VITE_API_URL=https://cpfosrovcqsfwwoekrdw.supabase.co/functions/v1
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+If you want the frontend to talk to the local Express server instead:
 
-## How can I deploy this project?
+```env
+VITE_API_URL=http://localhost:3001
+```
 
-Simply open [Lovable](https://lovable.dev/projects/57684921-7e34-4d2c-8b5e-5988b8c4c47a) and click on Share -> Publish.
+### Local server `server/.env`
 
-## Can I connect a custom domain to my Lovable project?
+The local server expects the Supabase project and database connection details. Keep service-role and database secrets out of client-side `VITE_*` variables.
 
-Yes, you can!
+### Supabase Function Secrets
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+The Edge API requires:
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+```env
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+DATABASE_URL=...
+PORTAL_PASSWORD_SETUP_URL=https://your-vercel-domain.vercel.app
+```
+
+`PORTAL_PASSWORD_SETUP_URL` is used in password setup / reset emails for portal users.
+
+## Authentication and Roles
+
+Login flow:
+
+1. User enters email or username
+2. Frontend resolves usernames through `login-identifier`
+3. Supabase Auth signs the user in
+4. `/api/me` returns the portal context
+5. The app routes the user based on role
+
+Portal context is built from:
+
+- `public.users`
+- `public.venues`
+- `public.court_portal_accounts`
+
+Current role model:
+
+- `user`: not allowed into the portal
+- `admin`: venue portal access
+- `internal`: platform-wide operations access
+
+## Internal Operations Features
+
+Internal users can:
+
+- view the operational dashboard
+- manage venues and venue admin accounts
+- manage plans, commission, and monthly fees
+- see bookings and revenue
+- view package expiry warnings
+
+The Users page includes:
+
+- managed venue admin accounts
+- legacy existing venue owners linked through `venues.owner_id`
+
+The Plans page uses only managed portal accounts.
+
+## Subscription and Plan Tracking
+
+Managed venue admin accounts in `court_portal_accounts` store:
+
+- `plan`
+- `monthly_fee_thb`
+- `commission_percent`
+- `months_paid`
+- `created_at`
+
+Expiry is derived from:
+
+```text
+created_at + months_paid months
+```
+
+The app currently shows in-app expiry warnings to:
+
+- internal users
+- venue admins
+
+This is not yet an automated email reminder system.
+
+## Database Migrations
+
+Recent important migrations:
+
+- `20260310100000_add_court_portal_accounts.sql`
+- `20260310113000_expand_court_plan_settings.sql`
+- `20260310123000_venue_admin_plan_contracts.sql`
+
+Apply migrations:
+
+```bash
+export SUPABASE_DB_PASSWORD='YOUR_DB_PASSWORD'
+supabase db push
+```
+
+## Deploying Supabase
+
+This repo is linked to the Supabase project configured in:
+
+- [supabase/config.toml](supabase/config.toml)
+
+Deploy the public login helper:
+
+```bash
+supabase functions deploy login-identifier --no-verify-jwt
+```
+
+Deploy the main API:
+
+```bash
+supabase functions deploy api
+```
+
+Typical order:
+
+```bash
+export SUPABASE_DB_PASSWORD='YOUR_DB_PASSWORD'
+supabase db push
+supabase functions deploy login-identifier --no-verify-jwt
+supabase functions deploy api
+```
+
+## Deploying Frontend
+
+Production frontend is intended for Vercel.
+
+Required Vercel environment variables:
+
+```env
+VITE_SUPABASE_PROJECT_ID=cpfosrovcqsfwwoekrdw
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
+VITE_SUPABASE_URL=https://cpfosrovcqsfwwoekrdw.supabase.co
+VITE_API_URL=https://cpfosrovcqsfwwoekrdw.supabase.co/functions/v1
+```
+
+After updating env vars or frontend code, redeploy Vercel.
+
+## Scripts
+
+```bash
+npm run dev         # Start Vite dev server
+npm run dev:server  # Start local Express server
+npm run build       # Production build
+npm run lint        # ESLint
+npm run test        # Currently runs lint
+npm run preview     # Preview production build locally
+```
+
+## Verification
+
+Basic checks used in this repo:
+
+```bash
+npm run lint
+npm run build
+```
+
+## Notes
+
+- The main runtime path is Supabase Functions, not the local Express server
+- Some legacy naming still uses `court_portal_accounts`, even though managed accounts are now venue-level in practice
+- If function deploy returns `403 Forbidden resource`, the Supabase CLI account likely does not have access to the linked project

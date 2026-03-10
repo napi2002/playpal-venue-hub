@@ -46,8 +46,10 @@ const PlansPage = () => {
   const [form, setForm] = useState(defaultForm);
 
   const { data: rows = [] } = useQuery({
-    queryKey: ["internal-users", "plans"],
-    queryFn: async () => (await apiFetch("/api/internal/users")) as PlanRow[],
+    queryKey: ["internal-plans"],
+    queryFn: async () => (await apiFetch("/api/internal/plans")) as PlanRow[],
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const updatePlan = useMutation({
@@ -64,6 +66,7 @@ const PlansPage = () => {
       });
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["internal-plans"] });
       queryClient.invalidateQueries({ queryKey: ["internal-users"] });
       queryClient.invalidateQueries({ queryKey: ["internal-overview"] });
       queryClient.invalidateQueries({ queryKey: ["internal-revenue"] });
@@ -87,6 +90,7 @@ const PlansPage = () => {
       });
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["internal-plans"] });
       queryClient.invalidateQueries({ queryKey: ["internal-users"] });
       queryClient.invalidateQueries({ queryKey: ["internal-overview"] });
       queryClient.invalidateQueries({ queryKey: ["internal-revenue"] });

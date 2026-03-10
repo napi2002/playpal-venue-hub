@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -42,7 +42,14 @@ const kpiClass = "border-slate-200 bg-white";
 const InternalDashboard = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const query = useMemo(() => search.trim(), [search]);
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setQuery(search.trim());
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["internal-overview", query],
@@ -51,6 +58,8 @@ const InternalDashboard = () => {
       if (query) params.set("q", query);
       return (await apiFetch(`/api/internal/overview?${params.toString()}`)) as OverviewResponse;
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const summary = data?.summary;
