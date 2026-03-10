@@ -29,12 +29,13 @@ export const usePayments = () => {
   const queryClient = useQueryClient();
   const { session } = useAuthSession();
   const { portalContext } = usePortalContext();
+  const isScopedAdmin = portalContext?.role === "admin" && (portalContext.courtIds?.length ?? 0) > 0;
   const getErrorMessage = (error: unknown, fallback: string) =>
     error instanceof Error && error.message ? error.message : fallback;
 
   const { data: payments = [], isLoading } = useQuery({
     queryKey: ["payments", session?.user?.id],
-    enabled: !!session?.user?.id && portalContext?.role === "admin",
+    enabled: !!session?.user?.id && portalContext?.role === "admin" && !isScopedAdmin,
     queryFn: async () => {
       const response = (await apiFetch("/api/payments?page=1&pageSize=200")) as {
         data?: Payment[];

@@ -31,7 +31,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     const checkVenue = async () => {
       setCheckingVenue(true);
       try {
-        if (portalContext?.role === "court") {
+        if (portalContext?.role === "internal") {
           setHasVenue(true);
           setRequiresOnboarding(false);
           return;
@@ -90,10 +90,30 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
 
   const isOnboardingRoute =
     location.pathname === "/onboarding" || location.pathname === "/onboarding/success";
-  const adminOnlyPrefixes = ["/venue", "/membership", "/payments", "/settings", "/onboarding", "/court-management"];
-  const isAdminOnlyRoute = adminOnlyPrefixes.some((prefix) => location.pathname.startsWith(prefix));
+  const internalAllowedPrefixes = [
+    "/dashboard",
+    "/users",
+    "/bookings",
+    "/payments",
+    "/plans",
+    "/support",
+    "/account-management",
+    "/court-management",
+  ];
+  const restrictedAdminPrefixes = ["/membership", "/payments", "/settings", "/onboarding"];
+  const isInternalAllowedRoute = internalAllowedPrefixes.some((prefix) => location.pathname.startsWith(prefix));
+  const isRestrictedAdminRoute = restrictedAdminPrefixes.some((prefix) => location.pathname.startsWith(prefix));
+  const isScopedAdmin = portalContext?.role === "admin" && (portalContext.courtIds?.length ?? 0) > 0;
 
-  if (portalContext?.role === "court" && isAdminOnlyRoute) {
+  if (portalContext?.role === "internal" && !isInternalAllowedRoute) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  if (portalContext?.role === "admin" && isInternalAllowedRoute && location.pathname !== "/dashboard" && location.pathname !== "/bookings" && location.pathname !== "/payments") {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  if (isScopedAdmin && isRestrictedAdminRoute) {
     return <Navigate to="/dashboard" replace />;
   }
 

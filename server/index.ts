@@ -23,6 +23,62 @@ const uploadStore = new Map<string, { buffer: Buffer; contentType: string }>();
 app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:8080" }));
 app.use(express.json({ limit: "2mb" }));
 
+const normalizeEmail = (value: unknown) =>
+  typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase()
+    : null;
+
+const normalizeUsername = (value: unknown) =>
+  typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase()
+    : null;
+
+app.post("/api/auth/login-identifier", async (req, res) => {
+  const rawIdentifier =
+    typeof req.body?.identifier === "string" ? req.body.identifier.trim() : "";
+
+  if (!rawIdentifier) {
+    res.status(400).json({ error: "Identifier is required" });
+    return;
+  }
+
+  const email = normalizeEmail(rawIdentifier);
+  if (email && email.includes("@")) {
+    res.json({ email });
+    return;
+  }
+
+  const username = normalizeUsername(rawIdentifier);
+  const { rows } = await pool.query<{ email: string }>(
+    `
+      select email
+      from (
+        select u.email
+        from public.users u
+        where lower(u.username) = $1
+          and u.is_active = true
+          and u.role in ('admin', 'internal')
+
+        union all
+
+        select cpa.login_email as email
+        from public.court_portal_accounts cpa
+        where lower(cpa.username) = $1
+          and cpa.is_active = true
+      ) lookup
+      limit 1
+    `,
+    [username],
+  );
+
+  if (!rows[0]?.email) {
+    res.status(404).json({ error: "Login account not found" });
+    return;
+  }
+
+  res.json({ email: rows[0].email });
+});
+
 const ensureVenueAccess = async (userId: string, venueId: string) => {
   const { rows } = await pool.query(
     "select 1 from public.user_roles where user_id = $1 and venue_id = $2 limit 1",

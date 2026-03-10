@@ -22,6 +22,8 @@ import {
 import { Filter, Search } from "lucide-react";
 import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
+import { usePortalContext } from "@/hooks/usePortalContext";
+import InternalPayments from "./InternalPayments";
 
 const PAGE_SIZE = 10;
 
@@ -74,6 +76,15 @@ type PendingBookingsResponse = {
 };
 
 const Payments = () => {
+  const { portalContext } = usePortalContext();
+  if (portalContext?.role === "internal") {
+    return <InternalPayments />;
+  }
+
+  return <VenuePayments />;
+};
+
+const VenuePayments = () => {
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState<"all" | PaymentStatus>("all");
   const [searchInput, setSearchInput] = useState("");

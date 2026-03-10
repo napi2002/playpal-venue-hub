@@ -3,6 +3,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Bell,
@@ -19,9 +20,21 @@ import { usePayments } from "@/hooks/usePayments";
 import { useCourts } from "@/hooks/useCourts";
 import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
+import { usePortalContext } from "@/hooks/usePortalContext";
+import InternalDashboard from "./InternalDashboard";
 
 const Dashboard = () => {
+  const { portalContext } = usePortalContext();
+  if (portalContext?.role === "internal") {
+    return <InternalDashboard />;
+  }
+
+  return <VenueDashboard />;
+};
+
+const VenueDashboard = () => {
   const navigate = useNavigate();
+  const { portalContext } = usePortalContext();
   const { bookings, isLoading: isBookingsLoading } = useBookings();
   const { payments, isLoading: isPaymentsLoading } = usePayments();
   const { courts, isLoading: isCourtsLoading } = useCourts();
@@ -353,6 +366,21 @@ const Dashboard = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {portalContext?.subscription && portalContext.subscription.expiryStatus !== "active" ? (
+          <Alert className="border-[#FF7A33]/30 bg-[#FF7A33]/5 text-[#1B1F23]">
+            <AlertTitle>
+              {portalContext.subscription.expiryStatus === "expired" ? "Package expired" : "Package expiring soon"}
+            </AlertTitle>
+            <AlertDescription>
+              Your {portalContext.subscription.plan} package was created on{" "}
+              {new Date(portalContext.subscription.createdAt).toLocaleDateString()}
+              {portalContext.subscription.expiresAt
+                ? ` and is set to end on ${new Date(portalContext.subscription.expiresAt).toLocaleDateString()}.`
+                : "."}{" "}
+              Ask PlayPal internal support to renew the package.
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="text-sm uppercase tracking-[0.2em] text-muted-foreground">

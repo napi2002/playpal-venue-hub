@@ -53,7 +53,7 @@ const Login = () => {
               <Input
                 id="identifier"
                 type="text"
-                placeholder="admin@playpal.com or court-a1"
+                placeholder="admin@playpal.com or venue-admin-a1"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 className="h-11"
@@ -86,7 +86,7 @@ const Login = () => {
           </form>
 
           <p className="text-center text-sm text-muted-foreground mt-2">
-            Admin and court portal accounts can sign in with email or username.
+            Portal admins and internal users can sign in with email or username.
           </p>
         </CardContent>
       </Card>

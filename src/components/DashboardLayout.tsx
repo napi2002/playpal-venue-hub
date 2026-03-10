@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   LogOut,
   IdCard,
+  LifeBuoy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
@@ -21,20 +22,29 @@ interface DashboardLayoutProps {
   children: ReactNode;
 }
 
-const adminNavigation = [
+const venueAdminNavigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Venue & Courts", href: "/venue", icon: MapPin },
-  { name: "Court Management", href: "/court-management", icon: IdCard },
   { name: "Availability", href: "/availability", icon: Calendar },
   { name: "Bookings", href: "/bookings", icon: BookOpen },
   { name: "Payments", href: "/payments", icon: CreditCard },
   { name: "Membership", href: "/membership", icon: IdCard },
 ];
 
-const courtNavigation = [
+const scopedAdminNavigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Venue & Courts", href: "/venue", icon: MapPin },
   { name: "Availability", href: "/availability", icon: Calendar },
   { name: "Bookings", href: "/bookings", icon: BookOpen },
+];
+
+const internalNavigation = [
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Users", href: "/users", icon: IdCard },
+  { name: "Bookings", href: "/bookings", icon: BookOpen },
+  { name: "Payments", href: "/payments", icon: CreditCard },
+  { name: "Plans", href: "/plans", icon: Calendar },
+  { name: "Support", href: "/support", icon: LifeBuoy },
 ];
 
 const DashboardLayout = ({ children }: DashboardLayoutProps) => {
@@ -42,7 +52,13 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const [collapsed, setCollapsed] = useState(false);
   const { signOut } = useAuth();
   const { portalContext } = usePortalContext();
-  const navigation = portalContext?.role === "court" ? courtNavigation : adminNavigation;
+  const isScopedAdmin = portalContext?.role === "admin" && (portalContext.courtIds?.length ?? 0) > 0;
+  const navigation =
+    portalContext?.role === "internal"
+      ? internalNavigation
+      : isScopedAdmin
+        ? scopedAdminNavigation
+        : venueAdminNavigation;
 
   return (
     <div className="min-h-screen flex w-full bg-background">

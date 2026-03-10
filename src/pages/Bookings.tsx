@@ -44,10 +44,21 @@ import { useRecurringBookings } from "@/hooks/useRecurringBookings";
 import { format } from "date-fns";
 import type { Database } from "@/integrations/supabase/types";
 import { useLocation } from "react-router-dom";
+import { usePortalContext } from "@/hooks/usePortalContext";
+import InternalBookings from "./InternalBookings";
 
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
 
 const Bookings = () => {
+  const { portalContext } = usePortalContext();
+  if (portalContext?.role === "internal") {
+    return <InternalBookings />;
+  }
+
+  return <VenueBookings />;
+};
+
+const VenueBookings = () => {
   const [statusFilter, setStatusFilter] = useState<"all" | BookingStatus>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [bookingDialogOpen, setBookingDialogOpen] = useState(false);

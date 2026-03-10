@@ -77,7 +77,7 @@ export const requireUser = async (req: Request, res: Response, next: NextFunctio
 export const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
   const user = await authenticateRequest(req, res);
   if (!user) return;
-  if (user.role !== "admin") {
+  if (user.role !== "admin" && user.role !== "internal") {
     res.status(403).json({ error: "Admin access required" });
     return;
   }

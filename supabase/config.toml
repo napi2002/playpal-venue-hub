@@ -1,1 +1,7 @@
-project_id = "uawizogybwkawezaswti"
+project_id = "cpfosrovcqsfwwoekrdw"
+
+[functions.api]
+verify_jwt = true
+
+[functions.login-identifier]
+verify_jwt = false

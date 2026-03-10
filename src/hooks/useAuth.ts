@@ -2,7 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuthSession } from "@/contexts/AuthContext";
-import { apiFetch } from "@/lib/apiClient";
+import { apiFetch, resolveLoginIdentifier } from "@/lib/apiClient";
 
 export const useAuth = () => {
   const { user, session, loading } = useAuthSession();
@@ -14,10 +14,7 @@ export const useAuth = () => {
   const signIn = async (identifier: string, password: string) => {
     try {
       const loginIdentifier = identifier.trim();
-      const resolved = await apiFetch("/api/auth/login-identifier", {
-        method: "POST",
-        body: JSON.stringify({ identifier: loginIdentifier }),
-      });
+      const resolved = await resolveLoginIdentifier(loginIdentifier);
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email: resolved.email,

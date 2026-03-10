@@ -45,11 +45,23 @@ type PortalContext = {
   dbUserId: number;
   email: string | null;
   username: string | null;
-  role: "admin" | "court" | "user";
+  role: "admin" | "internal" | "user";
   venueId: number | null;
   courtIds: number[];
   primaryCourtId: number | null;
+  subscription: {
+    accountId: number;
+    plan: "starter" | "growth" | "pro" | "custom";
+    monthlyFeeThb: number;
+    commissionPercent: number;
+    monthsPaid: number;
+    createdAt: string;
+    expiresAt: string | null;
+    expiryStatus: "active" | "expiring" | "expired";
+  } | null;
 };
+
+type PlanType = "starter" | "growth" | "pro" | "custom";
 
 const getUser = async (req: Request) => {
   const authHeader = req.headers.get("Authorization") ?? "";
@@ -115,6 +127,24 @@ const normalizeUsername = (value: unknown) =>
     ? value.trim().toLowerCase()
     : null;
 
+const normalizePlan = (value: unknown): PlanType | null =>
+  value === "starter" || value === "growth" || value === "pro" || value === "custom"
+    ? value
+    : null;
+
+const defaultPlanValues = (plan: PlanType) => ({
+  monthlyFeeThb: plan === "growth"
+    ? 600
+    : plan === "pro"
+      ? 1200
+      : 0,
+  commissionPercent: plan === "growth"
+    ? 8
+    : plan === "pro"
+      ? 5
+      : 10,
+});
+
 const getPasswordSetupRedirectTo = () =>
   Deno.env.get("PORTAL_PASSWORD_SETUP_URL") ??
   Deno.env.get("PORTAL_URL") ??
@@ -126,7 +156,7 @@ const getPortalContext = async (
 ): Promise<PortalContext | null> => {
   const { rows } = await client.queryObject<{
     id: number;
-    role: "admin" | "court" | "user";
+    role: "admin" | "internal" | "user";
     email: string | null;
     username: string | null;
   }>(
@@ -143,7 +173,73 @@ const getPortalContext = async (
   const dbUser = rows[0];
   if (!dbUser) return null;
 
-  if (dbUser.role === "admin") {
+  const { rows: accountRows } = await client.queryObject<{
+    id: number;
+    venue_id: number;
+    court_id: number | null;
+    plan: PlanType;
+    monthly_fee_thb: number;
+    commission_percent: number;
+    months_paid: number;
+    created_at: string;
+    expires_at: string | null;
+    expiry_status: "active" | "expiring" | "expired";
+  }>(
+    `
+      select
+        id,
+        venue_id,
+        court_id,
+        plan,
+        monthly_fee_thb,
+        commission_percent,
+        months_paid,
+        created_at,
+        case
+          when months_paid > 0 then (created_at + (months_paid || ' months')::interval)
+          else null
+        end as expires_at,
+        case
+          when months_paid > 0 and created_at + (months_paid || ' months')::interval <= now() then 'expired'
+          when months_paid > 0 and created_at + (months_paid || ' months')::interval <= now() + interval '14 days' then 'expiring'
+          else 'active'
+        end as expiry_status
+      from public.court_portal_accounts
+      where user_id = $1
+        and is_active = true
+      order by created_at asc
+    `,
+    [dbUser.id],
+  );
+
+  if (accountRows.length) {
+    const courtIds = accountRows.flatMap((row) => row.court_id ? [row.court_id] : []);
+    const primaryAccount = accountRows[0];
+    return {
+      authUserId: authUser.id,
+      dbUserId: dbUser.id,
+      email: dbUser.email,
+      username: dbUser.username,
+      role: "admin",
+      venueId: primaryAccount?.venue_id ?? null,
+      courtIds,
+      primaryCourtId: courtIds[0] ?? null,
+      subscription: primaryAccount
+        ? {
+          accountId: primaryAccount.id,
+          plan: primaryAccount.plan,
+          monthlyFeeThb: Number(primaryAccount.monthly_fee_thb ?? 0),
+          commissionPercent: Number(primaryAccount.commission_percent ?? 0),
+          monthsPaid: Number(primaryAccount.months_paid ?? 0),
+          createdAt: primaryAccount.created_at,
+          expiresAt: primaryAccount.expires_at,
+          expiryStatus: primaryAccount.expiry_status,
+        }
+        : null,
+    };
+  }
+
+  if (dbUser.role === "admin" || dbUser.role === "internal") {
     const venueId = await getPrimaryVenueId(client, dbUser.id);
     return {
       authUserId: authUser.id,
@@ -154,34 +250,7 @@ const getPortalContext = async (
       venueId,
       courtIds: [],
       primaryCourtId: null,
-    };
-  }
-
-  if (dbUser.role === "court") {
-    const { rows: accountRows } = await client.queryObject<{
-      venue_id: number;
-      court_id: number;
-    }>(
-      `
-        select venue_id, court_id
-        from public.court_portal_accounts
-        where user_id = $1
-          and is_active = true
-        order by created_at asc
-      `,
-      [dbUser.id],
-    );
-
-    const courtIds = accountRows.map((row) => row.court_id);
-    return {
-      authUserId: authUser.id,
-      dbUserId: dbUser.id,
-      email: dbUser.email,
-      username: dbUser.username,
-      role: dbUser.role,
-      venueId: accountRows[0]?.venue_id ?? null,
-      courtIds,
-      primaryCourtId: courtIds[0] ?? null,
+      subscription: null,
     };
   }
 
@@ -194,6 +263,7 @@ const getPortalContext = async (
     venueId: null,
     courtIds: [],
     primaryCourtId: null,
+    subscription: null,
   };
 };
 
@@ -202,20 +272,25 @@ const ensurePortalVenueAccess = async (
   portalUser: PortalContext,
   venueId: number,
 ) => {
-  if (portalUser.role === "admin") {
-    return await ensureVenueAccess(client, portalUser.dbUserId, venueId);
+  if (portalUser.role === "internal") {
+    return true;
   }
 
-  if (portalUser.role === "court") {
+  if (portalUser.role === "admin" && portalUser.courtIds.length > 0) {
     return portalUser.venueId === venueId;
+  }
+
+  if (portalUser.role === "admin") {
+    return await ensureVenueAccess(client, portalUser.dbUserId, venueId);
   }
 
   return false;
 };
 
 const ensureCourtScopedAccess = (portalUser: PortalContext, courtId: number | null) => {
-  if (portalUser.role === "admin") return true;
-  if (portalUser.role !== "court") return false;
+  if (portalUser.role === "internal") return true;
+  if (portalUser.role !== "admin") return false;
+  if (!portalUser.courtIds.length) return true;
   if (!courtId) return false;
   return portalUser.courtIds.includes(courtId);
 };
@@ -277,7 +352,7 @@ serve(async (req) => {
           from public.users
           where lower(username) = $1
             and is_active = true
-            and role in ('admin', 'court')
+            and role in ('admin', 'internal')
           limit 1
         `,
         [username],
@@ -301,13 +376,15 @@ serve(async (req) => {
   const client = await pool.connect();
   try {
     const portalUser = await getPortalContext(client, { id: user.id });
-    if (!portalUser || (portalUser.role !== "admin" && portalUser.role !== "court")) {
+    if (!portalUser || (portalUser.role !== "admin" && portalUser.role !== "internal")) {
       return jsonResponse({ error: "Portal access required" }, 403);
     }
-    const adminUserId = portalUser.role === "admin" ? portalUser.dbUserId : -1;
+    const adminUserId = portalUser.role === "admin" || portalUser.role === "internal"
+      ? portalUser.dbUserId
+      : -1;
 
     if (req.method === "POST" && pathname === "/api/upload") {
-      if (portalUser.role !== "admin") {
+      if (portalUser.role !== "admin" && portalUser.role !== "internal") {
         return jsonResponse({ error: "Admin access required" }, 403);
       }
 
@@ -565,7 +642,7 @@ serve(async (req) => {
     }
 
     if (req.method === "POST" && pathname.endsWith("/photos")) {
-      if (portalUser.role !== "admin") {
+      if (portalUser.role !== "admin" && portalUser.role !== "internal") {
         return jsonResponse({ error: "Admin access required" }, 403);
       }
       const venueId = parseId(pathname.split("/")[3]);
@@ -599,17 +676,577 @@ serve(async (req) => {
         venueId: portalUser.venueId,
         courtIds: portalUser.courtIds,
         primaryCourtId: portalUser.primaryCourtId,
+        subscription: portalUser.subscription,
+      });
+    }
+
+    if (req.method === "GET" && pathname === "/api/internal/venues") {
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
+      }
+
+      const { rows } = await client.queryObject(
+        `
+          select id, name, status, city, province
+          from public.venues
+          order by name asc
+        `,
+      );
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "GET" && pathname === "/api/internal/overview") {
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
+      }
+
+      const query = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
+      const queryValue = query ? `%${query}%` : null;
+
+      const { rows: summaryRows } = await client.queryObject<{
+        total_venues: number;
+        active_venues_30d: number;
+        total_admin_accounts: number;
+        bookings_today: number;
+        bookings_month: number;
+        platform_gmv: string;
+        commission_revenue: string;
+        expiring_packages: number;
+      }>(
+        `
+          with venue_plan as (
+            select distinct on (venue_id)
+              venue_id,
+              commission_percent
+            from public.court_portal_accounts
+            where is_active = true
+            order by venue_id, updated_at desc, created_at desc
+          ),
+          venue_activity as (
+            select distinct c.venue_id
+            from public.bookings b
+            join public.courts c on c.id = b.court_id
+            where b.created_at >= now() - interval '30 days'
+          ),
+          commissionable as (
+            select
+              b.id,
+              b.total_price::numeric as total_price,
+              coalesce(vp.commission_percent, 0) as commission_percent
+            from public.bookings b
+            left join venue_plan vp on vp.venue_id = b.venue_id
+            where b.status <> 'cancelled'
+          ),
+          expiring as (
+            select count(*)::int as total
+            from public.court_portal_accounts
+            where is_active = true
+              and months_paid > 0
+              and created_at + (months_paid || ' months')::interval <= now() + interval '14 days'
+          )
+          select
+            (select count(*)::int from public.venues) as total_venues,
+            (select count(*)::int from venue_activity) as active_venues_30d,
+            (select count(*)::int from public.court_portal_accounts where is_active = true) as total_admin_accounts,
+            (select count(*)::int from public.bookings where (slot_start at time zone 'Asia/Bangkok')::date = (now() at time zone 'Asia/Bangkok')::date and status <> 'cancelled') as bookings_today,
+            (select count(*)::int from public.bookings where date_trunc('month', slot_start at time zone 'Asia/Bangkok') = date_trunc('month', now() at time zone 'Asia/Bangkok') and status <> 'cancelled') as bookings_month,
+            (select coalesce(sum(total_price), 0)::text from commissionable) as platform_gmv,
+            (select coalesce(sum(total_price * commission_percent / 100.0), 0)::text from commissionable) as commission_revenue,
+            (select total from expiring) as expiring_packages
+        `,
+      );
+
+      const { rows: activityRows } = await client.queryObject<{
+        id: string;
+        type: string;
+        title: string;
+        detail: string;
+        happened_at: string;
+      }>(
+        `
+          select *
+          from (
+            select
+              'venue-' || v.id::text as id,
+              'venue_created' as type,
+              'New venue created' as title,
+              v.name as detail,
+              v.created_at as happened_at
+            from public.venues v
+
+            union all
+
+            select
+              'admin-' || cpa.id::text as id,
+              'admin_created' as type,
+              'New venue admin account created' as title,
+              coalesce(v.name, 'Unknown venue') || ' · ' || coalesce(cpa.login_email, cpa.username) as detail,
+              cpa.created_at as happened_at
+            from public.court_portal_accounts cpa
+            left join public.venues v on v.id = cpa.venue_id
+
+            union all
+
+            select
+              'plan-' || cpa.id::text || '-' || extract(epoch from cpa.updated_at)::text as id,
+              'plan_changed' as type,
+              'Plan updated' as title,
+              coalesce(v.name, 'Unknown venue') || ' · ' || cpa.plan::text as detail,
+              cpa.updated_at as happened_at
+            from public.court_portal_accounts cpa
+            left join public.venues v on v.id = cpa.venue_id
+            where cpa.updated_at > cpa.created_at
+
+            union all
+
+            select
+              'expiry-' || cpa.id::text as id,
+              'plan_expiring' as type,
+              'Package expiring soon' as title,
+              coalesce(v.name, 'Unknown venue') || ' · ' ||
+              coalesce(cpa.login_email, cpa.username) || ' · ' ||
+              to_char(cpa.created_at + (cpa.months_paid || ' months')::interval, 'YYYY-MM-DD') as detail,
+              cpa.created_at + (cpa.months_paid || ' months')::interval as happened_at
+            from public.court_portal_accounts cpa
+            left join public.venues v on v.id = cpa.venue_id
+            where cpa.is_active = true
+              and cpa.months_paid > 0
+              and cpa.created_at + (cpa.months_paid || ' months')::interval <= now() + interval '14 days'
+
+            union all
+
+            select
+              'booking-' || b.id::text as id,
+              'booking_created' as type,
+              'New booking' as title,
+              coalesce(v.name, 'Unknown venue') || ' · ' || coalesce(b.booking_number, b.id::text) as detail,
+              b.created_at as happened_at
+            from public.bookings b
+            left join public.venues v on v.id = b.venue_id
+          ) activity
+          where (
+            $1::text is null
+            or lower(title) like $1
+            or lower(detail) like $1
+          )
+          order by happened_at desc
+          limit 12
+        `,
+        [queryValue],
+      );
+
+      const { rows: expiringRows } = await client.queryObject<{
+        id: number;
+        venue_name: string;
+        admin_email: string;
+        plan: PlanType;
+        months_paid: number;
+        created_at: string;
+        expires_at: string;
+        expiry_status: "expiring" | "expired";
+      }>(
+        `
+          select
+            cpa.id,
+            v.name as venue_name,
+            cpa.login_email as admin_email,
+            cpa.plan,
+            cpa.months_paid,
+            cpa.created_at,
+            (cpa.created_at + (cpa.months_paid || ' months')::interval) as expires_at,
+            case
+              when cpa.created_at + (cpa.months_paid || ' months')::interval <= now() then 'expired'
+              else 'expiring'
+            end as expiry_status
+          from public.court_portal_accounts cpa
+          join public.venues v on v.id = cpa.venue_id
+          where cpa.is_active = true
+            and cpa.months_paid > 0
+            and cpa.created_at + (cpa.months_paid || ' months')::interval <= now() + interval '14 days'
+          order by expires_at asc
+          limit 10
+        `,
+      );
+
+      return jsonResponse({
+        summary: summaryRows[0] ?? null,
+        activity: activityRows,
+        expiringAccounts: expiringRows,
+      });
+    }
+
+    if (req.method === "GET" && pathname === "/api/internal/users") {
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
+      }
+
+      const plan = url.searchParams.get("plan");
+      const status = url.searchParams.get("status");
+      const venueId = url.searchParams.get("venueId");
+      const query = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
+      const params: Array<string> = [];
+      const where: string[] = [];
+
+      if (venueId && venueId !== "all") {
+        params.push(venueId);
+        where.push(`cpa.venue_id = $${params.length}::int`);
+      }
+      if (plan && plan !== "all") {
+        params.push(plan);
+        where.push(`cpa.plan::text = $${params.length}`);
+      }
+      if (status && status !== "all") {
+        if (status === "active") {
+          where.push("cpa.is_active = true");
+        } else if (status === "suspended") {
+          where.push("cpa.is_active = false");
+        }
+      }
+      if (query) {
+        params.push(`%${query}%`);
+        where.push(`(
+          lower(v.name) like $${params.length}
+          or lower(cpa.login_email) like $${params.length}
+          or lower(coalesce(u.full_name, '')) like $${params.length}
+        )`);
+      }
+
+      const { rows } = await client.queryObject(
+        `
+          select
+            cpa.id,
+            cpa.venue_id,
+            v.name as venue_name,
+            u.full_name as admin_account_name,
+            cpa.login_email as admin_email,
+            cpa.plan,
+            cpa.commission_percent,
+            cpa.monthly_fee_thb,
+            cpa.months_paid,
+            case when cpa.is_active then 'Active' else 'Suspended' end as status,
+            cpa.created_at,
+            cpa.court_id,
+            c.name as court_name,
+            case
+              when cpa.months_paid > 0 then cpa.created_at + (cpa.months_paid || ' months')::interval
+              else null
+            end as expires_at,
+            case
+              when cpa.months_paid > 0 and cpa.created_at + (cpa.months_paid || ' months')::interval <= now() then 'Expired'
+              when cpa.months_paid > 0 and cpa.created_at + (cpa.months_paid || ' months')::interval <= now() + interval '14 days' then 'Expiring Soon'
+              else 'Active'
+            end as expiry_status
+          from public.court_portal_accounts cpa
+          join public.venues v on v.id = cpa.venue_id
+          left join public.courts c on c.id = cpa.court_id
+          join public.users u on u.id = cpa.user_id
+          ${where.length ? `where ${where.join(" and ")}` : ""}
+          order by cpa.created_at desc
+        `,
+        params,
+      );
+
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "GET" && pathname.startsWith("/api/internal/venues/")) {
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
+      }
+
+      const venueId = parseId(pathname.split("/")[4]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+
+      const { rows: venueRows } = await client.queryObject(
+        `
+          select
+            v.*,
+            count(c.id)::int as courts_count
+          from public.venues v
+          left join public.courts c on c.venue_id = v.id
+          where v.id = $1
+          group by v.id
+          limit 1
+        `,
+        [venueId],
+      );
+      if (!venueRows[0]) return jsonResponse({ error: "Venue not found" }, 404);
+
+      const { rows: adminRows } = await client.queryObject(
+        `
+          select
+            cpa.id,
+            u.full_name as name,
+            cpa.login_email as email,
+            u.updated_at as last_login,
+            case when cpa.is_active then 'Active' else 'Suspended' end as status
+          from public.court_portal_accounts cpa
+          join public.users u on u.id = cpa.user_id
+          where cpa.venue_id = $1
+          order by cpa.created_at desc
+        `,
+        [venueId],
+      );
+
+      const { rows: metricRows } = await client.queryObject<{
+        total_bookings: number;
+        total_gmv: string;
+        total_commission: string;
+        bookings_30d: number;
+      }>(
+        `
+          with venue_plan as (
+            select distinct on (venue_id)
+              venue_id,
+              commission_percent
+            from public.court_portal_accounts
+            where is_active = true
+            order by venue_id, updated_at desc, created_at desc
+          )
+          select
+            count(*)::int as total_bookings,
+            coalesce(sum(b.total_price::numeric), 0)::text as total_gmv,
+            coalesce(sum((b.total_price::numeric * coalesce(vp.commission_percent, 0) / 100.0)), 0)::text as total_commission,
+            count(*) filter (where b.created_at >= now() - interval '30 days')::int as bookings_30d
+          from public.bookings b
+          left join venue_plan vp on vp.venue_id = b.venue_id
+          where b.venue_id = $1
+            and b.status <> 'cancelled'
+        `,
+        [venueId],
+      );
+
+      return jsonResponse({
+        venue: venueRows[0],
+        admins: adminRows,
+        metrics: metricRows[0] ?? null,
+      });
+    }
+
+    if (req.method === "GET" && pathname === "/api/internal/court-accounts") {
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
+      }
+
+      const { rows } = await client.queryObject(
+        `
+          select
+            cpa.id,
+            cpa.venue_id,
+            v.name as venue_name,
+            cpa.court_id,
+            c.name as court_name,
+            cpa.username,
+            cpa.login_email,
+            cpa.plan,
+            cpa.plan_notes,
+            cpa.is_active,
+            cpa.invite_sent_at,
+            cpa.password_reset_sent_at,
+            cpa.last_activated_at,
+            cpa.created_at,
+            cpa.months_paid,
+            u.full_name
+          from public.court_portal_accounts cpa
+          left join public.courts c on c.id = cpa.court_id
+          join public.venues v on v.id = cpa.venue_id
+          join public.users u on u.id = cpa.user_id
+          order by v.name asc, coalesce(c.name, u.full_name, cpa.login_email) asc
+        `,
+      );
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "GET" && pathname === "/api/internal/court-performance") {
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
+      }
+
+      const { rows } = await client.queryObject(
+        `
+          with revenue as (
+            select
+              b.court_id,
+              coalesce(sum(case when p.status = 'completed' then p.amount::numeric else 0 end), 0) as total_revenue,
+              count(distinct b.id)::int as bookings_count,
+              count(distinct b.id) filter (where b.status = 'pending')::int as pending_bookings
+            from public.courts c
+            left join public.bookings b on b.court_id = c.id
+            left join public.payments p on p.booking_id = b.id
+            group by b.court_id
+          )
+          select
+            c.id as court_id,
+            c.name as court_name,
+            c.venue_id,
+            v.name as venue_name,
+            c.status as court_status,
+            c.environment,
+            c.weekday_price_per_hour_thb,
+            c.weekend_price_per_hour_thb,
+            c.sport_type,
+            c.sport,
+            cpa.plan,
+            cpa.plan_notes,
+            cpa.username,
+            cpa.login_email,
+            coalesce(r.total_revenue, 0) as total_revenue,
+            coalesce(r.bookings_count, 0) as bookings_count,
+            coalesce(r.pending_bookings, 0) as pending_bookings
+          from public.courts c
+          join public.venues v on v.id = c.venue_id
+          left join public.court_portal_accounts cpa on cpa.court_id = c.id
+          left join revenue r on r.court_id = c.id
+          order by v.name asc, c.name asc
+        `,
+      );
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "GET" && pathname === "/api/internal/bookings") {
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
+      }
+
+      const start = url.searchParams.get("start");
+      const end = url.searchParams.get("end");
+      const venueId = url.searchParams.get("venueId");
+      const status = url.searchParams.get("status");
+      const query = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
+
+      const params: Array<string> = [];
+      const where = ["b.status <> 'cancelled'"];
+
+      if (start) {
+        params.push(start);
+        where.push(`b.slot_start >= $${params.length}`);
+      }
+      if (end) {
+        params.push(end);
+        where.push(`b.slot_start <= $${params.length}`);
+      }
+      if (venueId && venueId !== "all") {
+        params.push(venueId);
+        where.push(`b.venue_id = $${params.length}::int`);
+      }
+      if (status && status !== "all") {
+        params.push(status);
+        where.push(`b.status = $${params.length}::public.booking_status`);
+      }
+      if (query) {
+        params.push(`%${query}%`);
+        where.push(`(
+          lower(coalesce(v.name, '')) like $${params.length}
+          or lower(coalesce(c.name, '')) like $${params.length}
+          or lower(coalesce(b.player_name, '')) like $${params.length}
+          or lower(coalesce(b.booking_number, b.id::text)) like $${params.length}
+        )`);
+      }
+
+      const { rows } = await client.queryObject(
+        `
+          with venue_plan as (
+            select distinct on (venue_id)
+              venue_id,
+              commission_percent
+            from public.court_portal_accounts
+            where is_active = true
+            order by venue_id, updated_at desc, created_at desc
+          )
+          select
+            b.id,
+            coalesce(b.booking_number, b.id::text) as booking_id,
+            v.name as venue,
+            c.name as court,
+            b.player_name as player,
+            b.slot_start as booking_time,
+            b.total_price::numeric as price,
+            round((b.total_price::numeric * coalesce(vp.commission_percent, 0) / 100.0), 2) as commission,
+            b.status
+          from public.bookings b
+          left join public.venues v on v.id = b.venue_id
+          left join public.courts c on c.id = b.court_id
+          left join venue_plan vp on vp.venue_id = b.venue_id
+          where ${where.join(" and ")}
+          order by b.slot_start desc
+          limit 300
+        `,
+        params,
+      );
+
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "GET" && pathname === "/api/internal/revenue") {
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
+      }
+
+      const { rows: summaryRows } = await client.queryObject<{
+        commission_month: string;
+        commission_all_time: string;
+      }>(
+        `
+          with venue_plan as (
+            select distinct on (venue_id)
+              venue_id,
+              commission_percent
+            from public.court_portal_accounts
+            where is_active = true
+            order by venue_id, updated_at desc, created_at desc
+          )
+          select
+            coalesce(sum(case
+              when date_trunc('month', b.slot_start at time zone 'Asia/Bangkok') = date_trunc('month', now() at time zone 'Asia/Bangkok')
+              then b.total_price::numeric * coalesce(vp.commission_percent, 0) / 100.0
+              else 0
+            end), 0)::text as commission_month,
+            coalesce(sum(b.total_price::numeric * coalesce(vp.commission_percent, 0) / 100.0), 0)::text as commission_all_time
+          from public.bookings b
+          left join venue_plan vp on vp.venue_id = b.venue_id
+          where b.status <> 'cancelled'
+        `,
+      );
+
+      const { rows } = await client.queryObject(
+        `
+          with venue_plan as (
+            select distinct on (venue_id)
+              venue_id,
+              commission_percent
+            from public.court_portal_accounts
+            where is_active = true
+            order by venue_id, updated_at desc, created_at desc
+          )
+          select
+            v.name as venue,
+            to_char(date_trunc('month', b.slot_start at time zone 'Asia/Bangkok'), 'YYYY-MM') as period,
+            count(*)::int as total_bookings,
+            coalesce(sum(b.total_price::numeric), 0)::text as total_gmv,
+            coalesce(sum(b.total_price::numeric * coalesce(vp.commission_percent, 0) / 100.0), 0)::text as commission_earned
+          from public.bookings b
+          left join public.venues v on v.id = b.venue_id
+          left join venue_plan vp on vp.venue_id = b.venue_id
+          where b.status <> 'cancelled'
+          group by v.name, date_trunc('month', b.slot_start at time zone 'Asia/Bangkok')
+          order by period desc, venue asc
+        `,
+      );
+
+      return jsonResponse({
+        summary: summaryRows[0] ?? null,
+        rows,
       });
     }
 
     if (req.method === "GET" && pathname.endsWith("/court-accounts")) {
-      if (portalUser.role !== "admin") {
-        return jsonResponse({ error: "Admin access required" }, 403);
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
       }
 
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
 
       const { rows } = await client.queryObject(
@@ -622,6 +1259,9 @@ serve(async (req) => {
             cpa.username,
             cpa.login_email,
             cpa.plan,
+            cpa.monthly_fee_thb,
+            cpa.commission_percent,
+            cpa.months_paid,
             cpa.plan_notes,
             cpa.is_active,
             cpa.invite_sent_at,
@@ -630,10 +1270,10 @@ serve(async (req) => {
             cpa.created_at,
             u.full_name
           from public.court_portal_accounts cpa
-          join public.courts c on c.id = cpa.court_id
+          left join public.courts c on c.id = cpa.court_id
           join public.users u on u.id = cpa.user_id
           where cpa.venue_id = $1
-          order by c.name asc
+          order by coalesce(c.name, u.full_name, cpa.login_email) asc
         `,
         [venueId],
       );
@@ -641,13 +1281,13 @@ serve(async (req) => {
     }
 
     if (req.method === "POST" && pathname.endsWith("/court-accounts")) {
-      if (portalUser.role !== "admin") {
-        return jsonResponse({ error: "Admin access required" }, 403);
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
       }
 
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
 
       const body = await parseJsonBody(req);
@@ -658,10 +1298,17 @@ serve(async (req) => {
         typeof body.temporaryPassword === "string" && body.temporaryPassword.length >= 8
           ? body.temporaryPassword
           : null;
-      const plan =
-        body.plan === "free" || body.plan === "pro" || body.plan === "custom"
-          ? body.plan
-          : "free";
+      const plan = normalizePlan(body.plan) ?? "starter";
+      const defaults = defaultPlanValues(plan);
+      const monthlyFeeThb = typeof body.monthlyFeeThb === "number"
+        ? body.monthlyFeeThb
+        : defaults.monthlyFeeThb;
+      const commissionPercent = typeof body.commissionPercent === "number"
+        ? body.commissionPercent
+        : defaults.commissionPercent;
+      const monthsPaid = typeof body.monthsPaid === "number"
+        ? Math.max(0, Math.trunc(body.monthsPaid))
+        : 0;
       const fullName =
         typeof body.fullName === "string" && body.fullName.trim()
           ? body.fullName.trim()
@@ -671,19 +1318,21 @@ serve(async (req) => {
           ? body.planNotes.trim()
           : null;
 
-      if (!courtId || !email || !username || !temporaryPassword) {
-        return jsonResponse({ error: "Court, email, username, and temporary password are required" }, 400);
+      if (!email || !username || !temporaryPassword) {
+        return jsonResponse({ error: "Venue, email, username, and temporary password are required" }, 400);
       }
-      if (!ensureCourtScopedAccess(portalUser, courtId)) {
+      if (courtId && !ensureCourtScopedAccess(portalUser, courtId)) {
         return jsonResponse({ error: "Court not available" }, 400);
       }
 
-      const { rows: courtRows } = await client.queryObject<{ id: number }>(
-        "select id from public.courts where id = $1 and venue_id = $2 limit 1",
-        [courtId, venueId],
-      );
-      if (!courtRows[0]?.id) {
-        return jsonResponse({ error: "Court not found" }, 404);
+      if (courtId) {
+        const { rows: courtRows } = await client.queryObject<{ id: number }>(
+          "select id from public.courts where id = $1 and venue_id = $2 limit 1",
+          [courtId, venueId],
+        );
+        if (!courtRows[0]?.id) {
+          return jsonResponse({ error: "Court not found" }, 404);
+        }
       }
 
       await client.queryObject("begin");
@@ -694,9 +1343,9 @@ serve(async (req) => {
           email_confirm: true,
           user_metadata: {
             username,
-            role: "court",
+            role: "admin",
             venue_id: venueId,
-            court_id: courtId,
+            court_id: courtId ?? undefined,
           },
         });
         if (authUserError || !authUserData.user) {
@@ -708,7 +1357,7 @@ serve(async (req) => {
         const { rows: userRows } = await client.queryObject<{ id: number }>(
           `
             insert into public.users (email, role, full_name, username, auth_id)
-            values ($1, 'court', $2, $3, $4)
+            values ($1, 'admin', $2, $3, $4)
             returning id
           `,
           [email, fullName, username, authUserId],
@@ -728,16 +1377,19 @@ serve(async (req) => {
               username,
               login_email,
               plan,
+              monthly_fee_thb,
+              commission_percent,
+              months_paid,
               plan_notes,
               invited_by,
               invite_sent_at,
               password_reset_sent_at,
               is_active
             )
-            values ($1,$2,$3,$4,$5,$6,$7,$8,now(),now(),true)
+            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),now(),true)
             returning id
           `,
-          [userId, venueId, courtId, username, email, plan, planNotes, adminUserId],
+          [userId, venueId, courtId, username, email, plan, monthlyFeeThb, commissionPercent, monthsPaid, planNotes, adminUserId],
         );
 
         await sendPasswordSetupEmail(email);
@@ -745,13 +1397,13 @@ serve(async (req) => {
         return jsonResponse({ id: accountRows[0]?.id ?? null, email, username });
       } catch (error) {
         await client.queryObject("rollback");
-        return jsonResponse({ error: error instanceof Error ? error.message : "Failed to create court account" }, 500);
+        return jsonResponse({ error: error instanceof Error ? error.message : "Failed to create venue admin account" }, 500);
       }
     }
 
     if (req.method === "PUT" && pathname.startsWith("/api/court-accounts/")) {
-      if (portalUser.role !== "admin") {
-        return jsonResponse({ error: "Admin access required" }, 403);
+      if (portalUser.role !== "internal") {
+        return jsonResponse({ error: "Internal access required" }, 403);
       }
 
       const accountId = parseId(pathname.split("/")[3]);
@@ -764,10 +1416,10 @@ serve(async (req) => {
         typeof body.temporaryPassword === "string" && body.temporaryPassword.length >= 8
           ? body.temporaryPassword
           : null;
-      const plan =
-        body.plan === "free" || body.plan === "pro" || body.plan === "custom"
-          ? body.plan
-          : null;
+      const plan = normalizePlan(body.plan);
+      const monthlyFeeThb = typeof body.monthlyFeeThb === "number" ? body.monthlyFeeThb : undefined;
+      const commissionPercent = typeof body.commissionPercent === "number" ? body.commissionPercent : undefined;
+      const monthsPaid = typeof body.monthsPaid === "number" ? Math.max(0, Math.trunc(body.monthsPaid)) : undefined;
       const planNotes =
         typeof body.planNotes === "string" ? body.planNotes.trim() : undefined;
       const isActive = typeof body.isActive === "boolean" ? body.isActive : undefined;
@@ -791,7 +1443,7 @@ serve(async (req) => {
 
       const account = accountRows[0];
       if (!account) return jsonResponse({ error: "Court account not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, account.venue_id);
+      const ok = await ensurePortalVenueAccess(client, portalUser, account.venue_id);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
 
       await client.queryObject("begin");
@@ -826,10 +1478,13 @@ serve(async (req) => {
               plan_notes = coalesce($5, plan_notes),
               is_active = coalesce($6, is_active),
               password_reset_sent_at = case when $7 then now() else password_reset_sent_at end,
+              monthly_fee_thb = coalesce($8, monthly_fee_thb),
+              commission_percent = coalesce($9, commission_percent),
+              months_paid = coalesce($10, months_paid),
               updated_at = now()
             where id = $1
           `,
-          [accountId, username, email, plan, planNotes, isActive, resendPasswordEmail],
+          [accountId, username, email, plan, planNotes, isActive, resendPasswordEmail, monthlyFeeThb, commissionPercent, monthsPaid],
         );
 
         if (resendPasswordEmail) {
@@ -863,10 +1518,10 @@ serve(async (req) => {
 
       const params: Array<number | number[]> = [venueId];
       const courtScopeClause =
-        portalUser.role === "court" && portalUser.courtIds.length
+        portalUser.role === "admin" && portalUser.courtIds.length
           ? `and id = any($2::int[])`
           : "";
-      if (portalUser.role === "court" && portalUser.courtIds.length) {
+      if (portalUser.role === "admin" && portalUser.courtIds.length) {
         params.push(portalUser.courtIds);
       }
 
@@ -901,10 +1556,10 @@ serve(async (req) => {
 
       const params: Array<string | number | number[]> = [venueId, start, end];
       const courtScopeClause =
-        portalUser.role === "court" && portalUser.courtIds.length
+        portalUser.role === "admin" && portalUser.courtIds.length
           ? "and recurring_booking_id in (select id from public.recurring_bookings where court_id = any($4::int[]))"
           : "";
-      if (portalUser.role === "court" && portalUser.courtIds.length) {
+      if (portalUser.role === "admin" && portalUser.courtIds.length) {
         params.push(portalUser.courtIds);
       }
 
@@ -923,7 +1578,7 @@ serve(async (req) => {
     }
 
     if (req.method === "POST" && pathname.endsWith("/submit")) {
-      if (portalUser.role !== "admin") {
+      if (portalUser.role !== "admin" && portalUser.role !== "internal") {
         return jsonResponse({ error: "Admin access required" }, 403);
       }
       const venueId = parseId(pathname.split("/")[3]);
@@ -1049,10 +1704,10 @@ serve(async (req) => {
 
       const params: Array<number | number[]> = [venueId];
       const courtScopeClause =
-        portalUser.role === "court" && portalUser.courtIds.length
+        portalUser.role === "admin" && portalUser.courtIds.length
           ? "and b.court_id = any($2::int[])"
           : "";
-      if (portalUser.role === "court" && portalUser.courtIds.length) {
+      if (portalUser.role === "admin" && portalUser.courtIds.length) {
         params.push(portalUser.courtIds);
       }
 
@@ -1279,7 +1934,7 @@ serve(async (req) => {
       const courtId = url.searchParams.get("courtId");
       if (!start || !end) return jsonResponse({ error: "Start and end are required" }, 400);
 
-      if (portalUser.role === "court" && courtId && !portalUser.courtIds.includes(Number(courtId))) {
+      if (portalUser.role === "admin" && portalUser.courtIds.length && courtId && !portalUser.courtIds.includes(Number(courtId))) {
         return jsonResponse({ error: "Forbidden" }, 403);
       }
 
@@ -1288,7 +1943,7 @@ serve(async (req) => {
       if (courtId) {
         params.push(courtId);
         courtFilter = "and b.court_id = $4";
-      } else if (portalUser.role === "court" && portalUser.courtIds.length) {
+      } else if (portalUser.role === "admin" && portalUser.courtIds.length) {
         params.push(portalUser.courtIds);
         courtFilter = "and b.court_id = any($4::int[])";
       }
@@ -1343,10 +1998,10 @@ serve(async (req) => {
 
       const params: Array<number | number[]> = [venueId];
       const courtScopeClause =
-        portalUser.role === "court" && portalUser.courtIds.length
+        portalUser.role === "admin" && portalUser.courtIds.length
           ? "and rb.court_id = any($2::int[])"
           : "";
-      if (portalUser.role === "court" && portalUser.courtIds.length) {
+      if (portalUser.role === "admin" && portalUser.courtIds.length) {
         params.push(portalUser.courtIds);
       }
 

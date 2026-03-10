@@ -13,7 +13,10 @@ import Payments from "./pages/Payments";
 import Membership from "./pages/Membership";
 import PlayerProfile from "./pages/PlayerProfile";
 import SettingsPage from "./pages/SettingsPage";
-import CourtManagement from "./pages/CourtManagement";
+import AccountManagement from "./pages/AccountManagement";
+import InternalVenueDetail from "./pages/InternalVenueDetail";
+import PlansPage from "./pages/PlansPage";
+import SupportPage from "./pages/SupportPage";
 import NotFound from "./pages/NotFound";
 import VenueOnboarding from "./pages/VenueOnboarding";
 import VenueOnboardingSuccess from "./pages/VenueOnboardingSuccess";
@@ -40,7 +43,12 @@ const App = () => (
             <Route path="/membership" element={<ProtectedRoute><Membership /></ProtectedRoute>} />
             <Route path="/membership/:playerId" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-            <Route path="/court-management" element={<ProtectedRoute><CourtManagement /></ProtectedRoute>} />
+            <Route path="/users" element={<ProtectedRoute><AccountManagement /></ProtectedRoute>} />
+            <Route path="/users/:venueId" element={<ProtectedRoute><InternalVenueDetail /></ProtectedRoute>} />
+            <Route path="/plans" element={<ProtectedRoute><PlansPage /></ProtectedRoute>} />
+            <Route path="/support" element={<ProtectedRoute><SupportPage /></ProtectedRoute>} />
+            <Route path="/account-management" element={<ProtectedRoute><AccountManagement /></ProtectedRoute>} />
+            <Route path="/court-management" element={<ProtectedRoute><AccountManagement /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

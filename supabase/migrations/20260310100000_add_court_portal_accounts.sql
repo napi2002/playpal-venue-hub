@@ -1,11 +1,15 @@
 create type public.court_plan as enum ('free', 'pro', 'custom');
 
 alter type public.user_role rename to user_role_old;
-create type public.user_role as enum ('user', 'admin', 'court');
+create type public.user_role as enum ('user', 'admin', 'internal');
 
 alter table public.users
+  alter column role drop default,
   alter column role type public.user_role
   using role::text::public.user_role;
+
+alter table public.users
+  alter column role set default 'user';
 
 drop type public.user_role_old;
 
