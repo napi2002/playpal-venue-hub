@@ -11,20 +11,26 @@ export const useAuth = () => {
   const getErrorMessage = (error: unknown, fallback: string) =>
     error instanceof Error && error.message ? error.message : fallback;
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (identifier: string, password: string) => {
     try {
+      const loginIdentifier = identifier.trim();
+      const resolved = await apiFetch("/api/auth/login-identifier", {
+        method: "POST",
+        body: JSON.stringify({ identifier: loginIdentifier }),
+      });
+
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: resolved.email,
         password,
       });
 
       if (error) throw error;
 
       try {
-        await apiFetch("/api/venue");
+        await apiFetch("/api/me");
       } catch (adminError) {
         await supabase.auth.signOut();
-        toast.error("Admin access required");
+        toast.error("Portal access required");
         return { data: null, error: adminError };
       }
 

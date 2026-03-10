@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthSession } from "@/contexts/AuthContext";
 import { apiFetch } from "@/lib/apiClient";
+import { usePortalContext } from "@/hooks/usePortalContext";
 
 export interface Payment {
   id: string;
@@ -27,12 +28,13 @@ export interface Payment {
 export const usePayments = () => {
   const queryClient = useQueryClient();
   const { session } = useAuthSession();
+  const { portalContext } = usePortalContext();
   const getErrorMessage = (error: unknown, fallback: string) =>
     error instanceof Error && error.message ? error.message : fallback;
 
   const { data: payments = [], isLoading } = useQuery({
     queryKey: ["payments", session?.user?.id],
-    enabled: !!session?.user?.id,
+    enabled: !!session?.user?.id && portalContext?.role === "admin",
     queryFn: async () => {
       const response = (await apiFetch("/api/payments?page=1&pageSize=200")) as {
         data?: Payment[];

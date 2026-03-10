@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuthSession } from "@/contexts/AuthContext";
 import { apiFetch } from "@/lib/apiClient";
 import { supabase } from "@/integrations/supabase/client";
+import { usePortalContext } from "@/hooks/usePortalContext";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -10,6 +11,7 @@ interface ProtectedRouteProps {
 
 export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   const { user, loading } = useAuthSession();
+  const { portalContext, isLoading: isPortalLoading } = usePortalContext();
   const [hasVenue, setHasVenue] = useState<boolean | null>(null);
   const [requiresOnboarding, setRequiresOnboarding] = useState<boolean | null>(null);
   const [checkingVenue, setCheckingVenue] = useState(false);
@@ -29,6 +31,12 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     const checkVenue = async () => {
       setCheckingVenue(true);
       try {
+        if (portalContext?.role === "court") {
+          setHasVenue(true);
+          setRequiresOnboarding(false);
+          return;
+        }
+
         const pendingSubmit = localStorage.getItem("playpal-onboarding-submitted") === "true";
         const data = await apiFetch("/api/venue");
 
@@ -43,7 +51,11 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
         }
       } catch (error) {
         if (!isMounted) return;
-        if (error instanceof Error && error.message.includes("Admin access required")) {
+        if (
+          error instanceof Error &&
+          (error.message.includes("Admin access required") ||
+            error.message.includes("Portal access required"))
+        ) {
           await supabase.auth.signOut();
           navigate("/");
           return;
@@ -62,9 +74,9 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return () => {
       isMounted = false;
     };
-  }, [navigate, user]);
+  }, [navigate, portalContext?.role, user]);
 
-  if (loading || (user && checkingVenue)) {
+  if (loading || isPortalLoading || (user && checkingVenue)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-muted-foreground">Loading...</div>
@@ -78,6 +90,12 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
 
   const isOnboardingRoute =
     location.pathname === "/onboarding" || location.pathname === "/onboarding/success";
+  const adminOnlyPrefixes = ["/venue", "/membership", "/payments", "/settings", "/onboarding", "/court-management"];
+  const isAdminOnlyRoute = adminOnlyPrefixes.some((prefix) => location.pathname.startsWith(prefix));
+
+  if (portalContext?.role === "court" && isAdminOnlyRoute) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   if ((hasVenue === false || requiresOnboarding === true) && !isOnboardingRoute) {
     return <Navigate to="/onboarding" replace />;

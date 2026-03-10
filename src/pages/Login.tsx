@@ -7,9 +7,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import BrandMark from "@/components/BrandMark";
 
 const Login = () => {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -23,14 +24,14 @@ const Login = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      toast.error("Please enter both email and password");
+    if (!identifier || !password) {
+      toast.error("Please enter both login and password");
       return;
     }
 
     setLoading(true);
     
-    await signIn(email, password);
+    await signIn(identifier, password);
     
     setLoading(false);
   };
@@ -39,9 +40,7 @@ const Login = () => {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md shadow-lg border-border/50">
         <CardHeader className="space-y-3 text-center">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center mb-2">
-            <span className="text-2xl font-bold text-white">PP</span>
-          </div>
+          <BrandMark className="mx-auto mb-2 h-16 w-16" />
           <CardTitle className="text-2xl font-semibold">Welcome to PlayPal</CardTitle>
           <CardDescription className="text-base">
             Sign in to manage your venue
@@ -50,13 +49,13 @@ const Login = () => {
         <CardContent className="space-y-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email address</Label>
+              <Label htmlFor="identifier">Email or username</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="admin@playpal.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="identifier"
+                type="text"
+                placeholder="admin@playpal.com or court-a1"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 className="h-11"
                 disabled={loading}
               />
@@ -87,7 +86,7 @@ const Login = () => {
           </form>
 
           <p className="text-center text-sm text-muted-foreground mt-2">
-            Admin access only. Use your Supabase admin credentials to sign in.
+            Admin and court portal accounts can sign in with email or username.
           </p>
         </CardContent>
       </Card>

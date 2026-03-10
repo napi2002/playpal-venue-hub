@@ -40,6 +40,17 @@ const textResponse = (data: string, status = 200, headers: Record<string, string
     },
   });
 
+type PortalContext = {
+  authUserId: string;
+  dbUserId: number;
+  email: string | null;
+  username: string | null;
+  role: "admin" | "court" | "user";
+  venueId: number | null;
+  courtIds: number[];
+  primaryCourtId: number | null;
+};
+
 const getUser = async (req: Request) => {
   const authHeader = req.headers.get("Authorization") ?? "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
@@ -94,6 +105,131 @@ const parseId = (value: string | undefined) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const normalizeEmail = (value: unknown) =>
+  typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase()
+    : null;
+
+const normalizeUsername = (value: unknown) =>
+  typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase()
+    : null;
+
+const getPasswordSetupRedirectTo = () =>
+  Deno.env.get("PORTAL_PASSWORD_SETUP_URL") ??
+  Deno.env.get("PORTAL_URL") ??
+  CORS_ORIGIN;
+
+const getPortalContext = async (
+  client: ReturnType<typeof pool.connect>,
+  authUser: { id: string },
+): Promise<PortalContext | null> => {
+  const { rows } = await client.queryObject<{
+    id: number;
+    role: "admin" | "court" | "user";
+    email: string | null;
+    username: string | null;
+  }>(
+    `
+      select id, role, email, username
+      from public.users
+      where auth_id = $1
+        and is_active = true
+      limit 1
+    `,
+    [authUser.id],
+  );
+
+  const dbUser = rows[0];
+  if (!dbUser) return null;
+
+  if (dbUser.role === "admin") {
+    const venueId = await getPrimaryVenueId(client, dbUser.id);
+    return {
+      authUserId: authUser.id,
+      dbUserId: dbUser.id,
+      email: dbUser.email,
+      username: dbUser.username,
+      role: dbUser.role,
+      venueId,
+      courtIds: [],
+      primaryCourtId: null,
+    };
+  }
+
+  if (dbUser.role === "court") {
+    const { rows: accountRows } = await client.queryObject<{
+      venue_id: number;
+      court_id: number;
+    }>(
+      `
+        select venue_id, court_id
+        from public.court_portal_accounts
+        where user_id = $1
+          and is_active = true
+        order by created_at asc
+      `,
+      [dbUser.id],
+    );
+
+    const courtIds = accountRows.map((row) => row.court_id);
+    return {
+      authUserId: authUser.id,
+      dbUserId: dbUser.id,
+      email: dbUser.email,
+      username: dbUser.username,
+      role: dbUser.role,
+      venueId: accountRows[0]?.venue_id ?? null,
+      courtIds,
+      primaryCourtId: courtIds[0] ?? null,
+    };
+  }
+
+  return {
+    authUserId: authUser.id,
+    dbUserId: dbUser.id,
+    email: dbUser.email,
+    username: dbUser.username,
+    role: dbUser.role,
+    venueId: null,
+    courtIds: [],
+    primaryCourtId: null,
+  };
+};
+
+const ensurePortalVenueAccess = async (
+  client: ReturnType<typeof pool.connect>,
+  portalUser: PortalContext,
+  venueId: number,
+) => {
+  if (portalUser.role === "admin") {
+    return await ensureVenueAccess(client, portalUser.dbUserId, venueId);
+  }
+
+  if (portalUser.role === "court") {
+    return portalUser.venueId === venueId;
+  }
+
+  return false;
+};
+
+const ensureCourtScopedAccess = (portalUser: PortalContext, courtId: number | null) => {
+  if (portalUser.role === "admin") return true;
+  if (portalUser.role !== "court") return false;
+  if (!courtId) return false;
+  return portalUser.courtIds.includes(courtId);
+};
+
+const sendPasswordSetupEmail = async (email: string) => {
+  const redirectTo = getPasswordSetupRedirectTo();
+  const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
+    redirectTo,
+  });
+  if (error) {
+    throw error;
+  }
+};
+
 function extractLatLngFromMapsUrl(
   url: string | null | undefined,
 ): { latitude: number; longitude: number } | null {
@@ -117,6 +253,46 @@ serve(async (req) => {
   if (pathname.startsWith("/api/payments") || pathname.startsWith("/api/crm")) {
     pathname = pathname.replace("/api", "");
   }
+
+  if (req.method === "POST" && pathname === "/api/auth/login-identifier") {
+    const client = await pool.connect();
+    try {
+      const body = await parseJsonBody(req);
+      const rawIdentifier =
+        typeof body.identifier === "string" ? body.identifier.trim() : "";
+
+      if (!rawIdentifier) {
+        return jsonResponse({ error: "Identifier is required" }, 400);
+      }
+
+      const email = normalizeEmail(rawIdentifier);
+      if (email) {
+        return jsonResponse({ email });
+      }
+
+      const username = normalizeUsername(rawIdentifier);
+      const { rows } = await client.queryObject<{ email: string }>(
+        `
+          select email
+          from public.users
+          where lower(username) = $1
+            and is_active = true
+            and role in ('admin', 'court')
+          limit 1
+        `,
+        [username],
+      );
+
+      if (!rows[0]?.email) {
+        return jsonResponse({ error: "Login account not found" }, 404);
+      }
+
+      return jsonResponse({ email: rows[0].email });
+    } finally {
+      client.release();
+    }
+  }
+
   const user = await getUser(req);
   if (!user) {
     return jsonResponse({ error: "Invalid auth token" }, 401);
@@ -124,12 +300,17 @@ serve(async (req) => {
 
   const client = await pool.connect();
   try {
-    const adminUserId = await getAdminUserId(client, { id: user.id });
-    if (!adminUserId) {
-      return jsonResponse({ error: "Admin access required" }, 403);
+    const portalUser = await getPortalContext(client, { id: user.id });
+    if (!portalUser || (portalUser.role !== "admin" && portalUser.role !== "court")) {
+      return jsonResponse({ error: "Portal access required" }, 403);
     }
+    const adminUserId = portalUser.role === "admin" ? portalUser.dbUserId : -1;
 
     if (req.method === "POST" && pathname === "/api/upload") {
+      if (portalUser.role !== "admin") {
+        return jsonResponse({ error: "Admin access required" }, 403);
+      }
+
       const form = await req.formData();
       const file = form.get("file");
       if (!(file instanceof File)) {
@@ -384,6 +565,9 @@ serve(async (req) => {
     }
 
     if (req.method === "POST" && pathname.endsWith("/photos")) {
+      if (portalUser.role !== "admin") {
+        return jsonResponse({ error: "Admin access required" }, 403);
+      }
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
       const ok = await ensureVenueAccess(client, adminUserId, venueId);
@@ -405,10 +589,268 @@ serve(async (req) => {
       return jsonResponse({ ok: true });
     }
 
-    if (req.method === "GET" && pathname === "/api/venue") {
+    if (req.method === "GET" && pathname === "/api/me") {
+      return jsonResponse({
+        id: portalUser.authUserId,
+        dbUserId: portalUser.dbUserId,
+        email: portalUser.email,
+        username: portalUser.username,
+        role: portalUser.role,
+        venueId: portalUser.venueId,
+        courtIds: portalUser.courtIds,
+        primaryCourtId: portalUser.primaryCourtId,
+      });
+    }
+
+    if (req.method === "GET" && pathname.endsWith("/court-accounts")) {
+      if (portalUser.role !== "admin") {
+        return jsonResponse({ error: "Admin access required" }, 403);
+      }
+
+      const venueId = parseId(pathname.split("/")[3]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
       const { rows } = await client.queryObject(
-        "select * from public.venues where owner_id = $1 order by created_at desc limit 1",
-        [adminUserId],
+        `
+          select
+            cpa.id,
+            cpa.venue_id,
+            cpa.court_id,
+            c.name as court_name,
+            cpa.username,
+            cpa.login_email,
+            cpa.plan,
+            cpa.plan_notes,
+            cpa.is_active,
+            cpa.invite_sent_at,
+            cpa.password_reset_sent_at,
+            cpa.last_activated_at,
+            cpa.created_at,
+            u.full_name
+          from public.court_portal_accounts cpa
+          join public.courts c on c.id = cpa.court_id
+          join public.users u on u.id = cpa.user_id
+          where cpa.venue_id = $1
+          order by c.name asc
+        `,
+        [venueId],
+      );
+      return jsonResponse(rows);
+    }
+
+    if (req.method === "POST" && pathname.endsWith("/court-accounts")) {
+      if (portalUser.role !== "admin") {
+        return jsonResponse({ error: "Admin access required" }, 403);
+      }
+
+      const venueId = parseId(pathname.split("/")[3]);
+      if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const body = await parseJsonBody(req);
+      const courtId = parseId(String(body.courtId ?? body.court_id ?? ""));
+      const email = normalizeEmail(body.email ?? body.login_email);
+      const username = normalizeUsername(body.username);
+      const temporaryPassword =
+        typeof body.temporaryPassword === "string" && body.temporaryPassword.length >= 8
+          ? body.temporaryPassword
+          : null;
+      const plan =
+        body.plan === "free" || body.plan === "pro" || body.plan === "custom"
+          ? body.plan
+          : "free";
+      const fullName =
+        typeof body.fullName === "string" && body.fullName.trim()
+          ? body.fullName.trim()
+          : null;
+      const planNotes =
+        typeof body.planNotes === "string" && body.planNotes.trim()
+          ? body.planNotes.trim()
+          : null;
+
+      if (!courtId || !email || !username || !temporaryPassword) {
+        return jsonResponse({ error: "Court, email, username, and temporary password are required" }, 400);
+      }
+      if (!ensureCourtScopedAccess(portalUser, courtId)) {
+        return jsonResponse({ error: "Court not available" }, 400);
+      }
+
+      const { rows: courtRows } = await client.queryObject<{ id: number }>(
+        "select id from public.courts where id = $1 and venue_id = $2 limit 1",
+        [courtId, venueId],
+      );
+      if (!courtRows[0]?.id) {
+        return jsonResponse({ error: "Court not found" }, 404);
+      }
+
+      await client.queryObject("begin");
+      try {
+        const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.createUser({
+          email,
+          password: temporaryPassword,
+          email_confirm: true,
+          user_metadata: {
+            username,
+            role: "court",
+            venue_id: venueId,
+            court_id: courtId,
+          },
+        });
+        if (authUserError || !authUserData.user) {
+          throw authUserError ?? new Error("Failed to create auth user");
+        }
+
+        const authUserId = authUserData.user.id;
+
+        const { rows: userRows } = await client.queryObject<{ id: number }>(
+          `
+            insert into public.users (email, role, full_name, username, auth_id)
+            values ($1, 'court', $2, $3, $4)
+            returning id
+          `,
+          [email, fullName, username, authUserId],
+        );
+
+        const userId = userRows[0]?.id;
+        if (!userId) {
+          throw new Error("Failed to create portal user");
+        }
+
+        const { rows: accountRows } = await client.queryObject(
+          `
+            insert into public.court_portal_accounts (
+              user_id,
+              venue_id,
+              court_id,
+              username,
+              login_email,
+              plan,
+              plan_notes,
+              invited_by,
+              invite_sent_at,
+              password_reset_sent_at,
+              is_active
+            )
+            values ($1,$2,$3,$4,$5,$6,$7,$8,now(),now(),true)
+            returning id
+          `,
+          [userId, venueId, courtId, username, email, plan, planNotes, adminUserId],
+        );
+
+        await sendPasswordSetupEmail(email);
+        await client.queryObject("commit");
+        return jsonResponse({ id: accountRows[0]?.id ?? null, email, username });
+      } catch (error) {
+        await client.queryObject("rollback");
+        return jsonResponse({ error: error instanceof Error ? error.message : "Failed to create court account" }, 500);
+      }
+    }
+
+    if (req.method === "PUT" && pathname.startsWith("/api/court-accounts/")) {
+      if (portalUser.role !== "admin") {
+        return jsonResponse({ error: "Admin access required" }, 403);
+      }
+
+      const accountId = parseId(pathname.split("/")[3]);
+      if (!accountId) return jsonResponse({ error: "Court account not found" }, 404);
+
+      const body = await parseJsonBody(req);
+      const username = normalizeUsername(body.username);
+      const email = normalizeEmail(body.email ?? body.login_email);
+      const temporaryPassword =
+        typeof body.temporaryPassword === "string" && body.temporaryPassword.length >= 8
+          ? body.temporaryPassword
+          : null;
+      const plan =
+        body.plan === "free" || body.plan === "pro" || body.plan === "custom"
+          ? body.plan
+          : null;
+      const planNotes =
+        typeof body.planNotes === "string" ? body.planNotes.trim() : undefined;
+      const isActive = typeof body.isActive === "boolean" ? body.isActive : undefined;
+      const resendPasswordEmail = body.resendPasswordEmail === true;
+
+      const { rows: accountRows } = await client.queryObject<{
+        user_id: number;
+        venue_id: number;
+        auth_id: string;
+        login_email: string;
+      }>(
+        `
+          select cpa.user_id, cpa.venue_id, u.auth_id, cpa.login_email
+          from public.court_portal_accounts cpa
+          join public.users u on u.id = cpa.user_id
+          where cpa.id = $1
+          limit 1
+        `,
+        [accountId],
+      );
+
+      const account = accountRows[0];
+      if (!account) return jsonResponse({ error: "Court account not found" }, 404);
+      const ok = await ensureVenueAccess(client, adminUserId, account.venue_id);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      await client.queryObject("begin");
+      try {
+        if (account.auth_id && (email || temporaryPassword)) {
+          const { error } = await supabaseAdmin.auth.admin.updateUserById(account.auth_id, {
+            email: email ?? undefined,
+            password: temporaryPassword ?? undefined,
+          });
+          if (error) throw error;
+        }
+
+        await client.queryObject(
+          `
+            update public.users
+            set
+              email = coalesce($2, email),
+              username = coalesce($3, username),
+              updated_at = now()
+            where id = $1
+          `,
+          [account.user_id, email, username],
+        );
+
+        await client.queryObject(
+          `
+            update public.court_portal_accounts
+            set
+              username = coalesce($2, username),
+              login_email = coalesce($3, login_email),
+              plan = coalesce($4::public.court_plan, plan),
+              plan_notes = coalesce($5, plan_notes),
+              is_active = coalesce($6, is_active),
+              password_reset_sent_at = case when $7 then now() else password_reset_sent_at end,
+              updated_at = now()
+            where id = $1
+          `,
+          [accountId, username, email, plan, planNotes, isActive, resendPasswordEmail],
+        );
+
+        if (resendPasswordEmail) {
+          await sendPasswordSetupEmail(email ?? account.login_email);
+        }
+
+        await client.queryObject("commit");
+        return jsonResponse({ ok: true });
+      } catch (error) {
+        await client.queryObject("rollback");
+        return jsonResponse({ error: error instanceof Error ? error.message : "Failed to update court account" }, 500);
+      }
+    }
+
+    if (req.method === "GET" && pathname === "/api/venue") {
+      if (!portalUser.venueId) {
+        return jsonResponse(null);
+      }
+      const { rows } = await client.queryObject(
+        "select * from public.venues where id = $1 limit 1",
+        [portalUser.venueId],
       );
       return jsonResponse(rows[0] ?? null);
     }
@@ -416,12 +858,21 @@ serve(async (req) => {
     if (req.method === "GET" && pathname.endsWith("/courts")) {
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
 
+      const params: Array<number | number[]> = [venueId];
+      const courtScopeClause =
+        portalUser.role === "court" && portalUser.courtIds.length
+          ? `and id = any($2::int[])`
+          : "";
+      if (portalUser.role === "court" && portalUser.courtIds.length) {
+        params.push(portalUser.courtIds);
+      }
+
       const { rows } = await client.queryObject(
-        "select * from public.courts where venue_id = $1 order by name asc",
-        [venueId],
+        `select * from public.courts where venue_id = $1 ${courtScopeClause} order by name asc`,
+        params,
       );
       return jsonResponse(rows);
     }
@@ -441,12 +892,21 @@ serve(async (req) => {
     if (req.method === "GET" && pathname.endsWith("/recurring-booking-exceptions")) {
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
 
       const start = url.searchParams.get("start");
       const end = url.searchParams.get("end");
       if (!start || !end) return jsonResponse({ error: "Start and end are required" }, 400);
+
+      const params: Array<string | number | number[]> = [venueId, start, end];
+      const courtScopeClause =
+        portalUser.role === "court" && portalUser.courtIds.length
+          ? "and recurring_booking_id in (select id from public.recurring_bookings where court_id = any($4::int[]))"
+          : "";
+      if (portalUser.role === "court" && portalUser.courtIds.length) {
+        params.push(portalUser.courtIds);
+      }
 
       const { rows } = await client.queryObject(
         `
@@ -455,13 +915,17 @@ serve(async (req) => {
           where venue_id = $1
             and occurrence_date >= $2::date
             and occurrence_date < $3::date
+            ${courtScopeClause}
         `,
-        [venueId, start, end],
+        params,
       );
       return jsonResponse(rows);
     }
 
     if (req.method === "POST" && pathname.endsWith("/submit")) {
+      if (portalUser.role !== "admin") {
+        return jsonResponse({ error: "Admin access required" }, 403);
+      }
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
       const ok = await ensureVenueAccess(client, adminUserId, venueId);
@@ -477,9 +941,13 @@ serve(async (req) => {
     if (req.method === "POST" && pathname.endsWith("/bookings") && !pathname.endsWith("/bookings/list")) {
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
       const body = await parseJsonBody(req);
+      const courtId = parseId(String(body.courtId ?? body.court_id ?? ""));
+      if (!ensureCourtScopedAccess(portalUser, courtId)) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
 
       const slotStart = body.slotStart ?? body.start_at ?? body.startAt;
       const slotEnd = body.slotEnd ?? body.end_at ?? body.endAt;
@@ -510,7 +978,7 @@ serve(async (req) => {
         `,
         [
           venueId,
-          body.courtId,
+          courtId,
           slotStart,
           slotEnd,
           body.durationMinutes ?? body.duration ?? 60,
@@ -576,8 +1044,17 @@ serve(async (req) => {
     if (req.method === "GET" && pathname.endsWith("/bookings/list")) {
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const params: Array<number | number[]> = [venueId];
+      const courtScopeClause =
+        portalUser.role === "court" && portalUser.courtIds.length
+          ? "and b.court_id = any($2::int[])"
+          : "";
+      if (portalUser.role === "court" && portalUser.courtIds.length) {
+        params.push(portalUser.courtIds);
+      }
 
       const { rows } = await client.queryObject(
         `
@@ -589,9 +1066,10 @@ serve(async (req) => {
           from public.bookings b
           left join public.courts c on c.id = b.court_id
           where b.venue_id = $1
+            ${courtScopeClause}
           order by b.created_at desc
         `,
-        [venueId],
+        params,
       );
       return jsonResponse(rows);
     }
@@ -600,14 +1078,17 @@ serve(async (req) => {
       const bookingId = parseId(pathname.split("/")[3]);
       if (!bookingId) return jsonResponse({ error: "Booking not found" }, 404);
       const body = await parseJsonBody(req);
-      const { rows } = await client.queryObject<{ venue_id: number }>(
-        "select venue_id from public.bookings where id = $1",
+      const { rows } = await client.queryObject<{ venue_id: number; court_id: number }>(
+        "select venue_id, court_id from public.bookings where id = $1",
         [bookingId],
       );
       const venueId = rows[0]?.venue_id;
       if (!venueId) return jsonResponse({ error: "Booking not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!ensureCourtScopedAccess(portalUser, rows[0]?.court_id ?? null)) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
 
       const { rows: updated } = await client.queryObject(
         `
@@ -790,7 +1271,7 @@ serve(async (req) => {
     if (req.method === "GET" && pathname.startsWith("/api/venues/") && pathname.endsWith("/bookings")) {
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
 
       const start = url.searchParams.get("start");
@@ -798,9 +1279,19 @@ serve(async (req) => {
       const courtId = url.searchParams.get("courtId");
       if (!start || !end) return jsonResponse({ error: "Start and end are required" }, 400);
 
-      const params = [venueId, start, end];
-      const courtFilter = courtId ? "and b.court_id = $4" : "";
-      if (courtId) params.push(courtId);
+      if (portalUser.role === "court" && courtId && !portalUser.courtIds.includes(Number(courtId))) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
+
+      const params: Array<number | string | number[]> = [venueId, start, end];
+      let courtFilter = "";
+      if (courtId) {
+        params.push(courtId);
+        courtFilter = "and b.court_id = $4";
+      } else if (portalUser.role === "court" && portalUser.courtIds.length) {
+        params.push(portalUser.courtIds);
+        courtFilter = "and b.court_id = any($4::int[])";
+      }
 
       const { rows } = await client.queryObject<{
         id: string;
@@ -847,8 +1338,17 @@ serve(async (req) => {
     if (req.method === "GET" && pathname.endsWith("/recurring-bookings")) {
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+
+      const params: Array<number | number[]> = [venueId];
+      const courtScopeClause =
+        portalUser.role === "court" && portalUser.courtIds.length
+          ? "and rb.court_id = any($2::int[])"
+          : "";
+      if (portalUser.role === "court" && portalUser.courtIds.length) {
+        params.push(portalUser.courtIds);
+      }
 
       const { rows } = await client.queryObject(
         `
@@ -858,9 +1358,10 @@ serve(async (req) => {
           from public.recurring_bookings rb
           left join public.courts c on c.id = rb.court_id
           where rb.venue_id = $1
+            ${courtScopeClause}
           order by rb.day_of_week asc, rb.time asc
         `,
-        [venueId],
+        params,
       );
       return jsonResponse(rows);
     }
@@ -868,9 +1369,13 @@ serve(async (req) => {
     if (req.method === "POST" && pathname.endsWith("/recurring-bookings")) {
       const venueId = parseId(pathname.split("/")[3]);
       if (!venueId) return jsonResponse({ error: "Venue not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
       const body = await parseJsonBody(req);
+      const courtId = parseId(String(body.court_id ?? body.courtId ?? ""));
+      if (!ensureCourtScopedAccess(portalUser, courtId)) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
 
       const { rows } = await client.queryObject(
         `
@@ -890,7 +1395,7 @@ serve(async (req) => {
         `,
         [
           venueId,
-          body.court_id ?? body.courtId,
+          courtId,
           body.day_of_week ?? body.dayOfWeek,
           body.time,
           body.duration ?? body.duration_minutes ?? 60,
@@ -909,14 +1414,17 @@ serve(async (req) => {
       if (!recurringId) return jsonResponse({ error: "Recurring booking not found" }, 404);
       const body = await parseJsonBody(req);
 
-      const { rows: venueRows } = await client.queryObject<{ venue_id: number }>(
-        "select venue_id from public.recurring_bookings where id = $1",
+      const { rows: venueRows } = await client.queryObject<{ venue_id: number; court_id: number }>(
+        "select venue_id, court_id from public.recurring_bookings where id = $1",
         [recurringId],
       );
       const venueId = venueRows[0]?.venue_id;
       if (!venueId) return jsonResponse({ error: "Recurring booking not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!ensureCourtScopedAccess(portalUser, venueRows[0]?.court_id ?? null)) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
 
       const { rows } = await client.queryObject(
         `
@@ -956,14 +1464,17 @@ serve(async (req) => {
       const occurrenceDate = typeof body.date === "string" ? body.date : null;
       if (!occurrenceDate) return jsonResponse({ error: "Date is required" }, 400);
 
-      const { rows: venueRows } = await client.queryObject<{ venue_id: number }>(
-        "select venue_id from public.recurring_bookings where id = $1",
+      const { rows: venueRows } = await client.queryObject<{ venue_id: number; court_id: number }>(
+        "select venue_id, court_id from public.recurring_bookings where id = $1",
         [recurringId],
       );
       const venueId = venueRows[0]?.venue_id;
       if (!venueId) return jsonResponse({ error: "Recurring booking not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!ensureCourtScopedAccess(portalUser, venueRows[0]?.court_id ?? null)) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
 
       try {
         await client.queryObject(
@@ -990,20 +1501,38 @@ serve(async (req) => {
       const recurringId = parseId(pathname.split("/")[3]);
       if (!recurringId) return jsonResponse({ error: "Recurring booking not found" }, 404);
 
-      const { rows: venueRows } = await client.queryObject<{ venue_id: number }>(
-        "select venue_id from public.recurring_bookings where id = $1",
+      const { rows: venueRows } = await client.queryObject<{ venue_id: number; court_id: number }>(
+        "select venue_id, court_id from public.recurring_bookings where id = $1",
         [recurringId],
       );
       const venueId = venueRows[0]?.venue_id;
       if (!venueId) return jsonResponse({ error: "Recurring booking not found" }, 404);
-      const ok = await ensureVenueAccess(client, adminUserId, venueId);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
       if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!ensureCourtScopedAccess(portalUser, venueRows[0]?.court_id ?? null)) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
 
       await client.queryObject("delete from public.recurring_bookings where id = $1", [recurringId]);
       return jsonResponse({ ok: true });
     }
 
     if (req.method === "POST" && pathname.startsWith("/api/recurring-bookings/") && pathname.endsWith("/generate")) {
+      const recurringId = parseId(pathname.split("/")[3]);
+      if (!recurringId) return jsonResponse({ error: "Recurring booking not found" }, 404);
+
+      const { rows: recurringRows } = await client.queryObject<{ venue_id: number; court_id: number }>(
+        "select venue_id, court_id from public.recurring_bookings where id = $1",
+        [recurringId],
+      );
+      const venueId = recurringRows[0]?.venue_id;
+      if (!venueId) return jsonResponse({ error: "Recurring booking not found" }, 404);
+      const ok = await ensurePortalVenueAccess(client, portalUser, venueId);
+      if (!ok) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!ensureCourtScopedAccess(portalUser, recurringRows[0]?.court_id ?? null)) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
+
       return jsonResponse(0);
     }
 

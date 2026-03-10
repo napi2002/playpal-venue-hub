@@ -14,24 +14,35 @@ import {
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { usePortalContext } from "@/hooks/usePortalContext";
+import BrandMark from "@/components/BrandMark";
 
 interface DashboardLayoutProps {
   children: ReactNode;
 }
 
-const navigation = [
+const adminNavigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Venue & Courts", href: "/venue", icon: MapPin },
+  { name: "Court Management", href: "/court-management", icon: IdCard },
   { name: "Availability", href: "/availability", icon: Calendar },
   { name: "Bookings", href: "/bookings", icon: BookOpen },
   { name: "Payments", href: "/payments", icon: CreditCard },
   { name: "Membership", href: "/membership", icon: IdCard },
 ];
 
+const courtNavigation = [
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Availability", href: "/availability", icon: Calendar },
+  { name: "Bookings", href: "/bookings", icon: BookOpen },
+];
+
 const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const { signOut } = useAuth();
+  const { portalContext } = usePortalContext();
+  const navigation = portalContext?.role === "court" ? courtNavigation : adminNavigation;
 
   return (
     <div className="min-h-screen flex w-full bg-background">
@@ -47,9 +58,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
           <div className="flex h-16 items-center justify-between px-4 border-b border-sidebar-border">
             {!collapsed && (
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-                  <span className="text-sm font-bold text-white">PP</span>
-                </div>
+                <BrandMark className="h-8 w-8" />
                 <span className="font-semibold text-lg">PlayPal</span>
               </div>
             )}

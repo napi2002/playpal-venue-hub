@@ -13,6 +13,7 @@ import Payments from "./pages/Payments";
 import Membership from "./pages/Membership";
 import PlayerProfile from "./pages/PlayerProfile";
 import SettingsPage from "./pages/SettingsPage";
+import CourtManagement from "./pages/CourtManagement";
 import NotFound from "./pages/NotFound";
 import VenueOnboarding from "./pages/VenueOnboarding";
 import VenueOnboardingSuccess from "./pages/VenueOnboardingSuccess";
@@ -39,6 +40,7 @@ const App = () => (
             <Route path="/membership" element={<ProtectedRoute><Membership /></ProtectedRoute>} />
             <Route path="/membership/:playerId" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+            <Route path="/court-management" element={<ProtectedRoute><CourtManagement /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
