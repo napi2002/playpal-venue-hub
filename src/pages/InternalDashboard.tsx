@@ -87,7 +87,7 @@ const InternalDashboard = () => {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search venue name, admin email, booking ID"
+              placeholder="Search"
             />
           </div>
         </div>

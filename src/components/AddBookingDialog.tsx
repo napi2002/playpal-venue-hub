@@ -219,7 +219,7 @@ export const AddBookingDialog = ({
                 <Label htmlFor="court">Court *</Label>
                 <Select value={formData.courtId} onValueChange={(value) => setFormData({ ...formData, courtId: value })}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select court" />
+                    <SelectValue placeholder="Choose option" />
                   </SelectTrigger>
                   <SelectContent>
                     {courts.map((court) => (
@@ -238,7 +238,7 @@ export const AddBookingDialog = ({
                 id="player"
                 value={formData.player}
                 onChange={(e) => setFormData({ ...formData, player: e.target.value })}
-                placeholder="Enter player name"
+                placeholder="Enter name"
                 required
               />
             </div>
@@ -250,7 +250,7 @@ export const AddBookingDialog = ({
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                placeholder="player@example.com"
+                placeholder="Enter email"
                 required
               />
             </div>
@@ -290,7 +290,7 @@ export const AddBookingDialog = ({
                 id="notes"
                 value={formData.notes}
                 onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                placeholder="Add any special notes or requirements"
+                placeholder="Enter notes"
                 rows={3}
               />
             </div>

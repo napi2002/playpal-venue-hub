@@ -95,7 +95,7 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
               <Label htmlFor="court">Court</Label>
               <Select value={formData.court_id} onValueChange={(value) => setFormData({ ...formData, court_id: value })}>
                 <SelectTrigger id="court">
-                  <SelectValue placeholder="Select court" />
+                  <SelectValue placeholder="Choose option" />
                 </SelectTrigger>
                 <SelectContent>
                   {courts.map((court) => (
@@ -111,7 +111,7 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
               <Label htmlFor="day">Day of Week</Label>
               <Select value={formData.day_of_week} onValueChange={(value) => setFormData({ ...formData, day_of_week: value })}>
                 <SelectTrigger id="day">
-                  <SelectValue placeholder="Select day" />
+                  <SelectValue placeholder="Choose option" />
                 </SelectTrigger>
                 <SelectContent>
                   {daysOfWeek.map((day) => (

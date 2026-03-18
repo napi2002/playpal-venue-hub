@@ -289,7 +289,7 @@ const VenuePayments = () => {
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search by booking ID, player name, or transaction ID..."
+                    placeholder="Search"
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
                     className="pl-10"
@@ -299,7 +299,7 @@ const VenuePayments = () => {
               <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as "all" | PaymentStatus)}>
                 <SelectTrigger className="w-[180px]">
                   <Filter className="mr-2 h-4 w-4" />
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder="Choose option" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All statuses</SelectItem>

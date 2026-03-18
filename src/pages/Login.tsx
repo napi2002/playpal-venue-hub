@@ -53,7 +53,7 @@ const Login = () => {
               <Input
                 id="identifier"
                 type="text"
-                placeholder="admin@playpal.com or venue-admin-a1"
+                placeholder="Enter email or username"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 className="h-11"
@@ -65,7 +65,7 @@ const Login = () => {
               <Input
                 id="password"
                 type="password"
-                placeholder="Enter your password"
+                placeholder="Enter password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="h-11"

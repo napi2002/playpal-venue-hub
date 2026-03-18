@@ -123,7 +123,7 @@ const PlansPage = () => {
                 <div className="grid gap-2">
                   <Label>Venue Admin</Label>
                   <Select value={form.accountId} onValueChange={(value) => setForm((current) => ({ ...current, accountId: value }))}>
-                      <SelectTrigger><SelectValue placeholder="Select venue admin" /></SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder="Choose option" /></SelectTrigger>
                       <SelectContent>
                       {rows.filter((row) => !!row.portal_account_id).map((row) => (
                         <SelectItem key={row.id} value={String(row.id)}>

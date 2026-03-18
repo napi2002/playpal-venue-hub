@@ -263,7 +263,7 @@ const Membership = () => {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
-                        placeholder="Search by name, phone, or email"
+                        placeholder="Search"
                         value={searchInput}
                         onChange={(e) => setSearchInput(e.target.value)}
                         className="pl-10"
@@ -272,7 +272,7 @@ const Membership = () => {
                   </div>
                   <Select value={membershipFilter} onValueChange={setMembershipFilter}>
                     <SelectTrigger className="w-[220px]">
-                      <SelectValue placeholder="Membership type" />
+                      <SelectValue placeholder="Choose option" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All memberships</SelectItem>

@@ -193,7 +193,7 @@ const VenueBookings = () => {
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search by booking ID, player name, or court..."
+                    placeholder="Search"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-10"
@@ -203,7 +203,7 @@ const VenueBookings = () => {
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="w-[180px]">
                   <Filter className="mr-2 h-4 w-4" />
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder="Choose option" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All statuses</SelectItem>

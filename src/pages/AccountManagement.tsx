@@ -192,16 +192,16 @@ const AccountManagement = () => {
                   <div className="grid gap-2">
                     <Label>Venue</Label>
                     <Select value={form.venueId} onValueChange={(value) => setForm((current) => ({ ...current, venueId: value }))}>
-                      <SelectTrigger><SelectValue placeholder="Select venue" /></SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder="Choose option" /></SelectTrigger>
                       <SelectContent>
                         {venues.map((venue) => <SelectItem key={venue.id} value={String(venue.id)}>{venue.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
-                  <Input placeholder="Admin name" value={form.fullName} onChange={(e) => setForm((current) => ({ ...current, fullName: e.target.value }))} />
-                  <Input placeholder="Admin email" value={form.email} onChange={(e) => setForm((current) => ({ ...current, email: e.target.value }))} />
-                  <Input placeholder="Username" value={form.username} onChange={(e) => setForm((current) => ({ ...current, username: e.target.value }))} />
-                  <Input type="password" placeholder="Temporary password" value={form.temporaryPassword} onChange={(e) => setForm((current) => ({ ...current, temporaryPassword: e.target.value }))} />
+                  <Input placeholder="Enter name" value={form.fullName} onChange={(e) => setForm((current) => ({ ...current, fullName: e.target.value }))} />
+                  <Input placeholder="Enter email" value={form.email} onChange={(e) => setForm((current) => ({ ...current, email: e.target.value }))} />
+                  <Input placeholder="Enter username" value={form.username} onChange={(e) => setForm((current) => ({ ...current, username: e.target.value }))} />
+                  <Input type="password" placeholder="Enter password" value={form.temporaryPassword} onChange={(e) => setForm((current) => ({ ...current, temporaryPassword: e.target.value }))} />
                   <div className="grid gap-2">
                     <Label>Plan</Label>
                     <Select value={form.plan} onValueChange={handlePlanChange}>
@@ -243,9 +243,9 @@ const AccountManagement = () => {
         <Card>
           <CardContent className="pt-6">
             <div className="grid gap-4 md:grid-cols-4">
-              <Input placeholder="Search venue or email" value={filters.q} onChange={(e) => setFilters((current) => ({ ...current, q: e.target.value }))} />
+              <Input placeholder="Search" value={filters.q} onChange={(e) => setFilters((current) => ({ ...current, q: e.target.value }))} />
               <Select value={filters.plan} onValueChange={(value) => setFilters((current) => ({ ...current, plan: value }))}>
-                <SelectTrigger><SelectValue placeholder="Plan filter" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Choose option" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Plans</SelectItem>
                   <SelectItem value="starter">Starter</SelectItem>
@@ -255,7 +255,7 @@ const AccountManagement = () => {
                 </SelectContent>
               </Select>
               <Select value={filters.status} onValueChange={(value) => setFilters((current) => ({ ...current, status: value }))}>
-                <SelectTrigger><SelectValue placeholder="Status filter" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Choose option" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="Active">Active</SelectItem>
