@@ -123,7 +123,7 @@ export const useRecurringBookings = () => {
   return {
     recurringBookings,
     isLoading,
-    addRecurringBooking: addRecurringBooking.mutate,
+    addRecurringBooking: addRecurringBooking.mutateAsync,
     updateRecurringBooking: updateRecurringBooking.mutate,
     deleteRecurringBooking: deleteRecurringBooking.mutate,
     generateBookings: generateBookings.mutate,

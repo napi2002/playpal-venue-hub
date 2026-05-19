@@ -68,10 +68,11 @@ const VenueBookings = () => {
   const { recurringBookings, isLoading: isRecurringLoading, deleteRecurringBooking } =
     useRecurringBookings();
 
-  const getStatusColor = (status: BookingStatus) => {
+  const getStatusColor = (status: BookingStatus | string) => {
     switch (status) {
       case "paid":
       case "confirmed":
+      case "active":
         return "bg-green-500/10 text-green-700 border-green-200";
       case "pending":
       case "held":
@@ -267,7 +268,7 @@ const VenueBookings = () => {
                             {recurring.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right font-medium">฿{recurring.amount}</TableCell>
+                        <TableCell className="text-right font-medium text-muted-foreground">—</TableCell>
                         <TableCell>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>

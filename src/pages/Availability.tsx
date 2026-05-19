@@ -111,15 +111,9 @@ const Availability = () => {
           queryClient.invalidateQueries({ queryKey: ["recurring_bookings"] });
         }
       } else {
-        const payload: { status: string; paymentStatus?: string } = {
-          status: statusLower,
-        };
-        if (statusLower !== "cancelled") {
-          payload.paymentStatus = statusLower;
-        }
         await apiFetch(`/api/bookings/${selectedEvent.id}`, {
           method: "PUT",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ status: statusLower }),
         });
       }
       if (status === "CANCELLED") {
@@ -319,7 +313,7 @@ const Availability = () => {
 
     return recurringBookings.flatMap((recurring) => {
       if (recurring.status === "cancelled") return [];
-      if (selectedCourt !== "all" && recurring.court_id !== selectedCourt) return [];
+      if (selectedCourt !== "all" && String(recurring.court_id) !== selectedCourt) return [];
 
       const recurrenceStart = recurring.start_date;
       const recurrenceEnd = recurring.end_date ?? null;
@@ -549,7 +543,7 @@ const Availability = () => {
     const durationMinutes = Math.round(
       (new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000,
     );
-    const bookingDate = new Date(`${overrideForm.date}T00:00:00`);
+    const bookingDate = new Date(`${overrideForm.date}T00:00:00+07:00`);
     const isWeekend = bookingDate.getDay() === 0 || bookingDate.getDay() === 6;
     const hourlyRate = Number(
       isWeekend
@@ -568,75 +562,83 @@ const Availability = () => {
 
     const amount = ((hourlyRate * durationMinutes) / 60).toFixed(2);
 
-    const conflicts = (await apiFetch(
-      `/api/venues/${selected.venue_id}/bookings?start=${encodeURIComponent(
-        startAt,
-      )}&end=${encodeURIComponent(endAt)}&courtId=${overrideForm.courtId}`,
-    )) as Array<{ id: string }>;
+    try {
+      const conflicts = (await apiFetch(
+        `/api/venues/${selected.venue_id}/bookings?start=${encodeURIComponent(
+          startAt,
+        )}&end=${encodeURIComponent(endAt)}&courtId=${overrideForm.courtId}`,
+      )) as Array<{ id: string }>;
 
-    if (Array.isArray(conflicts) && conflicts.length > 0) {
+      if (Array.isArray(conflicts) && conflicts.length > 0) {
+        toast({
+          title: "Time unavailable",
+          description: "This court already has a booking during that time.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const createdBooking = await apiFetch(`/api/venues/${selected.venue_id}/bookings`, {
+        method: "POST",
+        body: JSON.stringify({
+          venueId: selected.venue_id,
+          courtId: overrideForm.courtId,
+          slotStart: startAt,
+          slotEnd: endAt,
+          durationMinutes,
+          status: "paid",
+          totalPrice: amount,
+          currency: "THB",
+          notes: null,
+          bookingNumber: generateBookingNumber(),
+          playerName: overrideForm.eventName,
+          playerEmail: "no-email@playpal.local",
+          source: "Manual",
+          paymentStatus: "Paid",
+        }),
+      });
+
+      toast({ title: "Booking created" });
+      if (createdBooking?.id) {
+        const optimisticEvent: BookingEvent = {
+          id: String(createdBooking.id),
+          courtId: overrideForm.courtId,
+          courtName: selected.name,
+          start: new Date(startAt).toISOString(),
+          end: new Date(endAt).toISOString(),
+          eventName: overrideForm.eventName,
+          status: "PAID",
+        };
+        queryClient.setQueryData<BookingEvent[]>(
+          bookingsQueryKey,
+          (current = []) => {
+            if (current.some((event) => event.id === optimisticEvent.id)) {
+              return current;
+            }
+            return [...current, optimisticEvent].sort(
+              (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
+            );
+          },
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: ["availability-bookings"] });
+      setOverrideDialogOpen(false);
+      setOverrideForm({
+        date: overrideForm.date,
+        startTime: overrideForm.startTime,
+        endTime: overrideForm.endTime,
+        courtId: overrideForm.courtId,
+        sport: "",
+        eventName: "",
+      });
+      refetchBookings();
+    } catch (error) {
       toast({
-        title: "Time unavailable",
-        description: "This court already has a booking during that time.",
+        title: "Failed to create booking",
+        description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive",
       });
-      return;
     }
-
-    const createdBooking = await apiFetch(`/api/venues/${selected.venue_id}/bookings`, {
-      method: "POST",
-      body: JSON.stringify({
-        venueId: selected.venue_id,
-        courtId: overrideForm.courtId,
-        slotStart: startAt,
-        slotEnd: endAt,
-        durationMinutes,
-        status: "paid",
-        totalPrice: amount,
-        currency: "THB",
-        notes: null,
-        bookingNumber: generateBookingNumber(),
-        playerName: overrideForm.eventName,
-        playerEmail: "no-email@playpal.local",
-        source: "Manual",
-        paymentStatus: "Paid",
-      }),
-    });
-
-    toast({ title: "Booking created" });
-    if (createdBooking?.id) {
-      const optimisticEvent: BookingEvent = {
-        id: String(createdBooking.id),
-        courtId: overrideForm.courtId,
-        courtName: selected.name,
-        start: new Date(startAt).toISOString(),
-        end: new Date(endAt).toISOString(),
-        eventName: overrideForm.eventName,
-        status: "PAID",
-      };
-      queryClient.setQueryData<BookingEvent[]>(
-        bookingsQueryKey,
-        (current = []) => {
-          if (current.some((event) => event.id === optimisticEvent.id)) {
-            return current;
-          }
-          return [...current, optimisticEvent].sort(
-            (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
-          );
-        },
-      );
-    }
-    queryClient.invalidateQueries({ queryKey: ["availability-bookings"] });
-    setOverrideDialogOpen(false);
-    setOverrideForm({
-      date: overrideForm.date,
-      startTime: overrideForm.startTime,
-      endTime: overrideForm.endTime,
-      courtId: overrideForm.courtId,
-      sport: "",
-      eventName: "",
-    });
-    refetchBookings();
   };
 
   return (

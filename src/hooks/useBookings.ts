@@ -104,20 +104,22 @@ export const useBookings = () => {
         body: JSON.stringify({
           status: "cancelled",
           cancellationTimestamp: new Date().toISOString(),
+          cancellationReason: "Cancelled by venue",
         }),
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bookings"] });
+      queryClient.invalidateQueries({ queryKey: ["availability-bookings"] });
       toast({
-        title: "Booking deleted",
-        description: "The booking has been removed successfully",
+        title: "Booking cancelled",
+        description: "The booking has been cancelled successfully",
       });
     },
     onError: (error: unknown) => {
       toast({
         title: "Error",
-        description: getErrorMessage(error, "Failed to delete booking"),
+        description: getErrorMessage(error, "Failed to cancel booking"),
         variant: "destructive",
       });
     },

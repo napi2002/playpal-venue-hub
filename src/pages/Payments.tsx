@@ -133,9 +133,15 @@ const VenuePayments = () => {
     [pendingQueryParams],
   );
 
+  const summaryQueryParams = useMemo(() => {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set("q", searchQuery);
+    return params.toString();
+  }, [searchQuery]);
+
   const fetchSummary = useCallback(async () => {
     try {
-      const data = await apiFetch(`/api/payments/summary?${queryParamString}`);
+      const data = await apiFetch(`/api/payments/summary?${summaryQueryParams}`);
       setSummary(data as SummaryResponse);
     } catch (error) {
       toast({
@@ -144,7 +150,7 @@ const VenuePayments = () => {
         variant: "destructive",
       });
     }
-  }, [queryParamString, toast]);
+  }, [summaryQueryParams, toast]);
 
   const fetchPayments = useCallback(async () => {
     try {

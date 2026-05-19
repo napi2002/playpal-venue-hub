@@ -44,21 +44,31 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Get venue_id from the first court (assuming all courts belong to same venue)
+
     const venue_id = courts[0]?.venue_id;
-    
     if (!venue_id) {
       console.error("No venue found");
       return;
     }
 
+    if (!formData.court_id || !formData.day_of_week) {
+      return;
+    }
+
+    const courtId = Number(formData.court_id);
+    const dayOfWeek = parseInt(formData.day_of_week, 10);
+    const duration = parseInt(formData.duration, 10);
+
+    if (isNaN(dayOfWeek) || isNaN(duration) || duration <= 0) {
+      return;
+    }
+
     const recurringBooking: TablesInsert<"recurring_bookings"> = {
       venue_id,
-      court_id: Number(formData.court_id),
-      day_of_week: parseInt(formData.day_of_week),
+      court_id: courtId,
+      day_of_week: dayOfWeek,
       time: formData.time,
-      duration: parseInt(formData.duration),
+      duration,
       player_name: formData.player_name,
       player_email: formData.player_email,
       start_date: format(formData.start_date, "yyyy-MM-dd"),
@@ -66,18 +76,22 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
       status: "active",
     };
 
-    addRecurringBooking(recurringBooking);
-    onOpenChange(false);
-    setFormData({
-      court_id: "",
-      day_of_week: "",
-      time: "",
-      duration: "60",
-      player_name: "",
-      player_email: "",
-      start_date: new Date(),
-      end_date: undefined,
-    });
+    try {
+      await addRecurringBooking(recurringBooking);
+      onOpenChange(false);
+      setFormData({
+        court_id: "",
+        day_of_week: "",
+        time: "",
+        duration: "60",
+        player_name: "",
+        player_email: "",
+        start_date: new Date(),
+        end_date: undefined,
+      });
+    } catch {
+      // error toast is handled by the mutation's onError
+    }
   };
 
   return (
