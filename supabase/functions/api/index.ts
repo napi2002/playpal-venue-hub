@@ -1720,6 +1720,18 @@ serve(async (req) => {
         return jsonResponse({ error: "slotStart and slotEnd are required" }, 400);
       }
 
+      const { rows: conflictRows } = await client.queryObject<{ cnt: number }>(
+        `select count(*)::int as cnt from public.bookings
+         where court_id = $1
+           and status in ('pending','paid','confirmed','held')
+           and slot_start < $3
+           and slot_end > $2`,
+        [courtId, slotStart, slotEnd],
+      );
+      if ((conflictRows[0]?.cnt ?? 0) > 0) {
+        return jsonResponse({ error: "This time slot is already booked for the selected court" }, 409);
+      }
+
       const { rows } = await client.queryObject(
         `
           insert into public.bookings (
@@ -2140,6 +2152,28 @@ serve(async (req) => {
       const courtId = parseId(String(body.court_id ?? body.courtId ?? ""));
       if (!ensureCourtScopedAccess(portalUser, courtId)) {
         return jsonResponse({ error: "Forbidden" }, 403);
+      }
+
+      const newTime = String(body.time ?? "");
+      const newDuration = parseInt(String(body.duration ?? body.duration_minutes ?? 60), 10);
+      const newDayOfWeek = parseInt(String(body.day_of_week ?? body.dayOfWeek ?? ""), 10);
+      const { rows: rbConflicts } = await client.queryObject<{ cnt: number }>(
+        `with new_slot as (
+           select
+             (extract(hour from $3::time) * 60 + extract(minute from $3::time))::int as start_min,
+             (extract(hour from $3::time) * 60 + extract(minute from $3::time) + $4::int)::int as end_min
+         )
+         select count(*)::int as cnt
+         from public.recurring_bookings, new_slot
+         where court_id = $1
+           and day_of_week = $2
+           and status <> 'cancelled'
+           and (extract(hour from time::time) * 60 + extract(minute from time::time))::int < new_slot.end_min
+           and (extract(hour from time::time) * 60 + extract(minute from time::time) + duration)::int > new_slot.start_min`,
+        [courtId, newDayOfWeek, newTime, newDuration],
+      );
+      if ((rbConflicts[0]?.cnt ?? 0) > 0) {
+        return jsonResponse({ error: "A recurring booking already exists at this time for the selected court" }, 409);
       }
 
       const { rows } = await client.queryObject(

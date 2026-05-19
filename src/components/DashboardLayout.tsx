@@ -144,7 +144,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       <main className="flex-1 overflow-y-auto">
         <div
           key={location.pathname}
-          className="container mx-auto p-6 max-w-7xl animate-in fade-in-0 duration-200"
+          className="container mx-auto p-6 max-w-7xl animate-in slide-in-from-bottom-2 duration-150"
         >
           {children}
         </div>

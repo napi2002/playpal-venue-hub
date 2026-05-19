@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useRecurringBookings } from "@/hooks/useRecurringBookings";
 import { useCourts } from "@/hooks/useCourts";
+import { useToast } from "@/hooks/use-toast";
 import { TablesInsert } from "@/integrations/supabase/types";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -28,9 +29,15 @@ const daysOfWeek = [
   { value: 6, label: "Saturday" },
 ];
 
+const timeToMinutes = (time: string) => {
+  const [h, m] = time.split(":").map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+};
+
 export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBookingDialogProps) {
   const { courts } = useCourts();
-  const { addRecurringBooking } = useRecurringBookings();
+  const { addRecurringBooking, recurringBookings } = useRecurringBookings();
+  const { toast } = useToast();
   const [formData, setFormData] = useState({
     court_id: "",
     day_of_week: "",
@@ -60,6 +67,26 @@ export function AddRecurringBookingDialog({ open, onOpenChange }: AddRecurringBo
     const duration = parseInt(formData.duration, 10);
 
     if (isNaN(dayOfWeek) || isNaN(duration) || duration <= 0) {
+      return;
+    }
+
+    const newStart = timeToMinutes(formData.time);
+    const newEnd = newStart + duration;
+    const hasConflict = recurringBookings.some((existing) => {
+      if (existing.status === "cancelled") return false;
+      if (String(existing.court_id) !== formData.court_id) return false;
+      if (existing.day_of_week !== dayOfWeek) return false;
+      const existingStart = timeToMinutes(existing.time);
+      const existingEnd = existingStart + Number(existing.duration);
+      return newStart < existingEnd && newEnd > existingStart;
+    });
+
+    if (hasConflict) {
+      toast({
+        title: "Time conflict",
+        description: "A recurring booking already exists at this time for this court.",
+        variant: "destructive",
+      });
       return;
     }
 
