@@ -81,7 +81,7 @@ export const AddBookingDialog = ({
 
     return recurringBookings.some((recurring) => {
       if (recurring.status === "cancelled") return false;
-      if (recurring.court_id !== courtId) return false;
+      if (String(recurring.court_id) !== courtId) return false;
       if (recurring.day_of_week !== bookingWeekday) return false;
       if (bookingDateKey < recurring.start_date) return false;
       if (recurring.end_date && bookingDateKey > recurring.end_date) return false;
@@ -114,7 +114,7 @@ export const AddBookingDialog = ({
         throw new Error("Selected court is missing venue access");
       }
 
-      const bookingDate = new Date(`${formData.date}T00:00:00`);
+      const bookingDate = new Date(`${formData.date}T00:00:00+07:00`);
       const isWeekend = bookingDate.getDay() === 0 || bookingDate.getDay() === 6;
       const hourlyRate = Number(
         isWeekend
@@ -176,7 +176,11 @@ export const AddBookingDialog = ({
       onOpenChange(false);
       setFormData(buildDefaultFormData());
     } catch (error) {
-      console.error("Error creating booking:", error);
+      toast({
+        title: "Failed to create booking",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }

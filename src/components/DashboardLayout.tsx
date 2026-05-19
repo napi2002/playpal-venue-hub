@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { usePortalContext } from "@/hooks/usePortalContext";
+import { useVenue } from "@/hooks/useVenue";
 import BrandMark from "@/components/BrandMark";
 
 interface DashboardLayoutProps {
@@ -52,6 +53,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const [collapsed, setCollapsed] = useState(false);
   const { signOut } = useAuth();
   const { portalContext } = usePortalContext();
+  const { venue } = useVenue();
   const isScopedAdmin = portalContext?.role === "admin" && (portalContext.courtIds?.length ?? 0) > 0;
   const navigation =
     portalContext?.role === "internal"
@@ -72,17 +74,23 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         <div className="flex h-full flex-col">
           {/* Logo */}
           <div className="flex h-16 items-center justify-between px-4 border-b border-sidebar-border">
-            {!collapsed && (
-              <div className="flex items-center gap-2">
-                <BrandMark className="h-8 w-8" />
-                <span className="font-semibold text-lg">PlayPal</span>
+            {collapsed ? (
+              <BrandMark className="h-7 w-7 mx-auto" />
+            ) : (
+              <div className="flex flex-col min-w-0">
+                <span className="font-semibold text-sm leading-tight truncate">
+                  {venue?.name_en ?? venue?.name ?? "Your Venue"}
+                </span>
+                <span className="text-[10px] text-sidebar-foreground/40 leading-tight">
+                  Powered by PlayPal
+                </span>
               </div>
             )}
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setCollapsed(!collapsed)}
-              className="h-8 w-8"
+              className="h-8 w-8 shrink-0"
             >
               <ChevronLeft
                 className={cn(
