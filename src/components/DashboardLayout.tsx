@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -142,12 +143,14 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
 
       {/* Main content */}
       <main className="flex-1 overflow-y-auto">
-        <div
-          key={location.pathname}
-          className="container mx-auto p-6 max-w-7xl animate-in slide-in-from-bottom-2 duration-150"
-        >
-          {children}
-        </div>
+        <ErrorBoundary key={location.pathname}>
+          <div
+            key={location.pathname}
+            className="container mx-auto p-6 max-w-7xl animate-in slide-in-from-bottom-2 duration-150"
+          >
+            {children}
+          </div>
+        </ErrorBoundary>
       </main>
     </div>
   );

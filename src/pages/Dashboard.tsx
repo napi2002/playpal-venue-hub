@@ -190,7 +190,10 @@ const VenueDashboard = () => {
         if (weekday !== rb.day_of_week) continue;
         if (rb.start_date && dayKey < rb.start_date) continue;
         if (rb.end_date && dayKey > rb.end_date) continue;
-        const slotStart = new Date(`${dayKey}T${rb.time}:00+07:00`);
+        if (!rb.time) continue;
+        // rb.time from Postgres `time` type is "HH:MM:SS" — use as-is (no :00 suffix)
+        const slotStart = new Date(`${dayKey}T${rb.time}+07:00`);
+        if (isNaN(slotStart.getTime())) continue;
         const slotEnd = new Date(slotStart.getTime() + Number(rb.duration) * 60000);
         if (slotEnd <= now) continue;
         results.push({
