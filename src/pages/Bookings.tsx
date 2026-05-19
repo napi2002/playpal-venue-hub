@@ -244,11 +244,15 @@ const VenueBookings = () => {
                 </TableHeader>
                 <TableBody>
                   {isRecurringLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8">
-                        Loading recurring bookings...
-                      </TableCell>
-                    </TableRow>
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <TableRow key={i} className="animate-pulse">
+                        {Array.from({ length: 8 }).map((_, j) => (
+                          <TableCell key={j}>
+                            <div className="h-4 rounded bg-muted" />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
                   ) : recurringBookings.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
@@ -317,11 +321,15 @@ const VenueBookings = () => {
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={10} className="text-center py-8">
-                        Loading bookings...
-                      </TableCell>
-                    </TableRow>
+                    Array.from({ length: 5 }).map((_, i) => (
+                      <TableRow key={i} className="animate-pulse">
+                        {Array.from({ length: 10 }).map((_, j) => (
+                          <TableCell key={j}>
+                            <div className="h-4 rounded bg-muted" />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
                   ) : filteredBookings.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">

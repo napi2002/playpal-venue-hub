@@ -22,7 +22,16 @@ import VenueOnboarding from "./pages/VenueOnboarding";
 import VenueOnboardingSuccess from "./pages/VenueOnboardingSuccess";
 import { AuthProvider } from "@/contexts/AuthContext";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60_000,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      retry: 1,
+    },
+  },
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>

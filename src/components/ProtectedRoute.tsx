@@ -78,8 +78,29 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
 
   if (loading || isPortalLoading || (user && checkingVenue)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-muted-foreground">Loading...</div>
+      <div className="min-h-screen flex w-full bg-background animate-pulse">
+        <aside className="w-64 shrink-0 border-r border-border bg-sidebar">
+          <div className="flex h-full flex-col">
+            <div className="flex h-16 items-center gap-3 border-b border-border px-4">
+              <div className="h-7 w-7 rounded-md bg-muted" />
+              <div className="h-4 w-28 rounded bg-muted" />
+            </div>
+            <div className="flex-1 space-y-1 p-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-10 rounded-lg bg-muted/60" />
+              ))}
+            </div>
+          </div>
+        </aside>
+        <main className="flex-1 p-6 space-y-6 max-w-7xl">
+          <div className="h-8 w-44 rounded bg-muted" />
+          <div className="grid grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-28 rounded-xl bg-muted" />
+            ))}
+          </div>
+          <div className="h-72 rounded-xl bg-muted" />
+        </main>
       </div>
     );
   }
