@@ -18,6 +18,7 @@ import {
 import { useBookings } from "@/hooks/useBookings";
 import { usePayments } from "@/hooks/usePayments";
 import { useCourts } from "@/hooks/useCourts";
+import { useRecurringBookings } from "@/hooks/useRecurringBookings";
 import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { usePortalContext } from "@/hooks/usePortalContext";
@@ -38,6 +39,7 @@ const VenueDashboard = () => {
   const { bookings, isLoading: isBookingsLoading } = useBookings();
   const { payments, isLoading: isPaymentsLoading } = usePayments();
   const { courts, isLoading: isCourtsLoading } = useCourts();
+  const { recurringBookings } = useRecurringBookings();
 
   const bangkokDateKey = useMemo(
     () =>
@@ -144,15 +146,101 @@ const VenueDashboard = () => {
   }, [todaysBookings, getPaymentStatus]);
 
   const activeCourts = useMemo(
-    () => courts.filter((court) => court.status === "active").length,
+    () =>
+      courts.filter(
+        (court) =>
+          court.is_active !== false &&
+          String(court.status ?? "active").toLowerCase() !== "inactive",
+      ).length,
     [courts],
   );
 
+  const recurringUpcoming = useMemo(() => {
+    const results: Array<{
+      id: string;
+      court_name: string | null;
+      player_name: string | null;
+      sport: null;
+      sport_type: null;
+      status: "confirmed";
+      slot_start: string;
+      slot_end: string;
+      start_at: null;
+      end_at: null;
+      date: null;
+      time: null;
+      final_price: null;
+      total_price: null;
+      amount: null;
+      payment_status: null;
+      player_email: null;
+      booking_number: null;
+      duration_minutes: number;
+      created_at: string;
+      updated_at: null;
+      _isRecurring: true;
+    }> = [];
+
+    for (const rb of recurringBookings) {
+      if (rb.status === "cancelled") continue;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(now.getTime() + i * 86400000);
+        const dayKey = bangkokDateKey.format(d);
+        const weekday = new Date(`${dayKey}T12:00:00+07:00`).getDay();
+        if (weekday !== rb.day_of_week) continue;
+        if (rb.start_date && dayKey < rb.start_date) continue;
+        if (rb.end_date && dayKey > rb.end_date) continue;
+        const slotStart = new Date(`${dayKey}T${rb.time}:00+07:00`);
+        const slotEnd = new Date(slotStart.getTime() + Number(rb.duration) * 60000);
+        if (slotEnd <= now) continue;
+        results.push({
+          id: `recurring-${rb.id}-${dayKey}`,
+          court_name: (rb as typeof rb & { court_name?: string }).court_name ?? String(rb.court_id),
+          player_name: rb.player_name,
+          sport: null,
+          sport_type: null,
+          status: "confirmed",
+          slot_start: slotStart.toISOString(),
+          slot_end: slotEnd.toISOString(),
+          start_at: null,
+          end_at: null,
+          date: null,
+          time: null,
+          final_price: null,
+          total_price: null,
+          amount: null,
+          payment_status: null,
+          player_email: null,
+          booking_number: null,
+          duration_minutes: Number(rb.duration),
+          created_at: new Date().toISOString(),
+          updated_at: null,
+          _isRecurring: true,
+        });
+      }
+    }
+    return results;
+  }, [recurringBookings, bangkokDateKey, now]);
+
   const upcomingBookingsSorted = useMemo(() => {
-    return [...upcomingBookings].sort(
+    const combined = [
+      ...upcomingBookings,
+      ...recurringUpcoming.filter(
+        (ri) => !upcomingBookings.some((b) => {
+          const bStart = getBookingStart(b);
+          const bEnd = getBookingEnd(b);
+          return (
+            b.court_name === ri.court_name &&
+            Math.abs(bStart.getTime() - new Date(ri.slot_start).getTime()) < 60000 &&
+            bEnd.getTime() >= new Date(ri.slot_end).getTime()
+          );
+        }),
+      ),
+    ];
+    return combined.sort(
       (a, b) => getBookingStart(a).getTime() - getBookingStart(b).getTime(),
     );
-  }, [getBookingStart, upcomingBookings]);
+  }, [getBookingStart, getBookingEnd, upcomingBookings, recurringUpcoming]);
 
   const unpaidSoon = useMemo(() => {
     const windowEnd = new Date(now.getTime() + 2 * 60 * 60 * 1000);
@@ -451,7 +539,7 @@ const VenueDashboard = () => {
               <AlertTriangle className="h-4 w-4 text-orange-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-semibold text-orange-950">{upcomingBookings.length}</div>
+              <div className="text-2xl font-semibold text-orange-950">{upcomingBookingsSorted.length}</div>
               <div className="text-xs text-orange-700">Scheduled sessions</div>
             </CardContent>
           </Card>
@@ -488,31 +576,43 @@ const VenueDashboard = () => {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {upcomingBookingsSorted.slice(0, 5).map((booking) => (
-                    <button
-                      key={booking.id}
-                      className="flex w-full items-start justify-between gap-3 rounded-lg border border-border p-3 text-left transition hover:bg-muted/30"
-                      type="button"
-                      onClick={() => navigate(`/bookings?bookingId=${booking.id}`)}
-                    >
-                      <div>
-                        <div className="text-sm font-medium">
-                          {formatTimeRange(booking)} • {booking.court_name || "Court"}
+                  {upcomingBookingsSorted.slice(0, 5).map((booking) => {
+                    const isRecurring = "_isRecurring" in booking && booking._isRecurring;
+                    return (
+                      <button
+                        key={booking.id}
+                        className="flex w-full items-start justify-between gap-3 rounded-lg border border-border p-3 text-left transition hover:bg-muted/30"
+                        type="button"
+                        onClick={() => !isRecurring && navigate(`/bookings?bookingId=${booking.id}`)}
+                      >
+                        <div>
+                          <div className="text-sm font-medium flex items-center gap-2">
+                            {formatTimeRange(booking)} • {booking.court_name || "Court"}
+                            {isRecurring && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200">
+                                Recurring
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {booking.player_name ?? "Guest"} · {booking.sport ?? booking.sport_type ?? "—"}
+                          </div>
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {booking.player_name ?? "Guest"} · {booking.sport ?? booking.sport_type ?? "—"}
+                        <div className="flex items-center gap-2 text-sm">
+                          {!isRecurring && (
+                            <>
+                              <Badge variant="outline" className={statusBadgeClass(getPaymentStatus(booking))}>
+                                {getPaymentStatus(booking)}
+                              </Badge>
+                              <span className="font-medium">
+                                ฿{Number(booking.final_price ?? booking.total_price ?? booking.amount ?? 0).toFixed(2)}
+                              </span>
+                            </>
+                          )}
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <Badge variant="outline" className={statusBadgeClass(getPaymentStatus(booking))}>
-                          {getPaymentStatus(booking)}
-                        </Badge>
-                        <span className="font-medium">
-                          ฿{Number(booking.final_price ?? booking.total_price ?? booking.amount ?? 0).toFixed(2)}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
               {unpaidSoon.length > 0 && (

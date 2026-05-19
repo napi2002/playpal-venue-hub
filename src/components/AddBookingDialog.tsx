@@ -226,11 +226,22 @@ export const AddBookingDialog = ({
                     <SelectValue placeholder="Choose option" />
                   </SelectTrigger>
                   <SelectContent>
-                    {courts.map((court) => (
-                      <SelectItem key={court.id} value={String(court.id)}>
-                        {court.name} - {court.sport ?? court.sport_type ?? "Sport"}
-                      </SelectItem>
-                    ))}
+                    {courts.map((court) => {
+                      const inactive =
+                        court.is_active === false ||
+                        String(court.status ?? "active").toLowerCase() === "inactive";
+                      return (
+                        <SelectItem
+                          key={court.id}
+                          value={String(court.id)}
+                          disabled={inactive}
+                          className={inactive ? "opacity-40 line-through" : ""}
+                        >
+                          {court.name} - {court.sport ?? court.sport_type ?? "Sport"}
+                          {inactive ? " (inactive)" : ""}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>
