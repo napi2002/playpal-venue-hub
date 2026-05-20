@@ -270,10 +270,6 @@ const Availability = () => {
     const dayLabels = Array.from({ length: 7 }, (_, index) => index);
     const days: string[] = [];
     const weekdayByDate = new Map<string, number>();
-    const weekdayFormatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: "Asia/Bangkok",
-      weekday: "short",
-    });
     const weekdayIndex = new Map([
       ["Sun", 0],
       ["Mon", 1],
@@ -284,12 +280,7 @@ const Availability = () => {
       ["Sat", 6],
     ]);
     for (let idx = 0; idx < visibleDays.length; idx += 1) {
-      const dateKey = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Asia/Bangkok",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(visibleDays[idx]);
+      const dateKey = formatBangkokDateKey(visibleDays[idx]);
       days.push(dateKey);
       const weekdayLabel = weekdayFormatter.format(visibleDays[idx]);
       const weekdayValue = weekdayIndex.get(weekdayLabel);
@@ -352,7 +343,7 @@ const Availability = () => {
         ];
       });
     });
-  }, [courts, recurringBookings, recurringExceptions, selectedCourt, visibleDays]);
+  }, [courts, recurringBookings, recurringExceptions, selectedCourt, visibleDays, weekdayFormatter]);
 
   const bookingsQueryKey = [
     "availability-bookings",

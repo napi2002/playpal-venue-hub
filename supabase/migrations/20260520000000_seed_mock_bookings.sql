@@ -1,11 +1,15 @@
--- Seed 30 mock bookings for demo/development purposes.
--- Targets the first venue found and distributes across its courts.
+-- Superseded by 20260519130000_playpal_court_demo_data.sql which provides richer demo data.
+-- Kept for migration history. This block is now a no-op.
 do $$
 declare
   _venue_id integer;
   _courts   integer[];
   _nc       integer;
 begin
+  -- Skip: replaced by 20260519130000_playpal_court_demo_data.sql
+  raise notice 'Old mock booking seed skipped — demo data already provided.';
+  return;
+
   select id into _venue_id from public.venues order by id limit 1;
   if _venue_id is null then
     raise notice 'No venue found — skipping mock booking seed.';

@@ -116,6 +116,25 @@ const VenueDashboard = () => {
     [now],
   );
 
+  const weekAgo = useMemo(
+    () => new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+    [now],
+  );
+
+  const earliestByEmail = useMemo(() => {
+    const map = new Map<string, Date>();
+    bookings.forEach((booking) => {
+      if (!booking.player_email) return;
+      const email = booking.player_email.toLowerCase();
+      const createdAt = new Date(booking.created_at);
+      const existing = map.get(email);
+      if (!existing || createdAt < existing) {
+        map.set(email, createdAt);
+      }
+    });
+    return map;
+  }, [bookings]);
+
   const todaysBookings = useMemo(() => {
     return bookings
       .filter((booking) => booking.status !== "cancelled")
@@ -257,29 +276,17 @@ const VenueDashboard = () => {
   }, [bookings, getBookingStart, getPaymentStatus, now]);
 
   const weeklyRevenue = useMemo(() => {
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     return payments
       .filter((payment) => {
         if (String(payment.status).toLowerCase() !== "completed") return false;
         return new Date(payment.created_at) >= weekAgo;
       })
       .reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
-  }, [now, payments]);
+  }, [weekAgo, payments]);
 
   const newMemberCount = useMemo(() => {
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const earliestByEmail = new Map<string, Date>();
-    bookings.forEach((booking) => {
-      if (!booking.player_email) return;
-      const email = booking.player_email.toLowerCase();
-      const createdAt = new Date(booking.created_at);
-      const existing = earliestByEmail.get(email);
-      if (!existing || createdAt < existing) {
-        earliestByEmail.set(email, createdAt);
-      }
-    });
     return Array.from(earliestByEmail.values()).filter((date) => date >= weekAgo).length;
-  }, [bookings, now]);
+  }, [earliestByEmail, weekAgo]);
 
   const paymentSummary = useMemo(() => {
     return payments.reduce(
@@ -302,17 +309,6 @@ const VenueDashboard = () => {
       detail: string;
       time: Date;
     }> = [];
-
-    const earliestByEmail = new Map<string, Date>();
-    bookings.forEach((booking) => {
-      if (!booking.player_email) return;
-      const email = booking.player_email.toLowerCase();
-      const createdAt = new Date(booking.created_at);
-      const existing = earliestByEmail.get(email);
-      if (!existing || createdAt < existing) {
-        earliestByEmail.set(email, createdAt);
-      }
-    });
 
     bookings.forEach((booking) => {
       const createdAt = new Date(booking.created_at);
@@ -337,7 +333,6 @@ const VenueDashboard = () => {
     });
 
     earliestByEmail.forEach((date, email) => {
-      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       if (date < weekAgo) return;
       items.push({
         id: `member-${email}`,
@@ -363,7 +358,7 @@ const VenueDashboard = () => {
       .filter((item) => !Number.isNaN(item.time.getTime()))
       .sort((a, b) => b.time.getTime() - a.time.getTime())
       .slice(0, 30);
-  }, [bookings, now, payments]);
+  }, [bookings, weekAgo, payments, earliestByEmail]);
 
   const formatTimeRange = (booking: typeof bookings[number]) => {
     const start = getBookingStart(booking);
